@@ -8,4 +8,4 @@ https://roadmap.sh/
 https://medium.com/@alessandro.traversi/mastering-google-design-docs-a-comprehensive-guide-with-readme-md-template-a2706b57f64d
 https://www.industrialempathy.com/posts/design-docs-at-google/
 ----------------
-сделать прототип для стереоэкрана и стереоплощадки
+сделать прототип для публичной демо версии
