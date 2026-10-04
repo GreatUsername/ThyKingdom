@@ -139,6 +139,8 @@ def reflow(text: str) -> str:
         if in_code or ln.lstrip().startswith("|") or ln.lstrip().startswith(">"):
             result.append(ln)
             continue
+        if ln == "" and result and result[-1] == "":
+            continue  # collapse repeated blank lines
         result.append(re.sub(r"(?<=\S) {2,}(?=\S)", " ", ln).rstrip())
     return "\n".join(result)
 
