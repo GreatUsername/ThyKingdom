@@ -6,16 +6,28 @@
 
 namespace core {
 
-Evaluator::Evaluator(World world, Clock clock)
-    : m_clock(clock), m_world(std::move(world)) {}
+Evaluator::Evaluator(World world, Clock clock, Settings settings)
+    : m_clock(clock), m_world(std::move(world)), m_settings(std::move(settings)) {}
 
 void Evaluator::pushSignal(const ControlSignal& signal) {
     m_pending.push_back(signal);
 }
 
 void Evaluator::applyPendingSignals() {
-    // Nothing to apply yet: ControlSignal has no fields. The path exists so the
-    // boundary rule is established before the first command does.
+    for (const auto& signal : m_pending) {
+        switch (signal.kind) {
+        case SignalKind::BeginAcceleration:
+            m_mode = Mode::Accelerating;
+            m_acceleration_remaining_us = signal.span_us;
+            break;
+        case SignalKind::InterruptAcceleration:
+            // An interrupt ends acceleration and starts a new turn just as
+            // completing the span does (OD-14).
+            m_mode = Mode::Normal;
+            m_acceleration_remaining_us = 0;
+            break;
+        }
+    }
     m_pending.clear();
 }
 
@@ -23,6 +35,14 @@ void Evaluator::advance(std::int64_t dt_us) {
     applyPendingSignals();
     m_clock.advance(dt_us);
     m_world.step(m_clock, dt_us);
+
+    if (m_mode == Mode::Accelerating) {
+        m_acceleration_remaining_us -= dt_us;
+        if (m_acceleration_remaining_us <= 0) {
+            m_acceleration_remaining_us = 0;
+            m_mode = Mode::Normal;
+        }
+    }
 }
 
 std::uint64_t Evaluator::hash() const {
@@ -32,8 +52,8 @@ std::uint64_t Evaluator::hash() const {
     return h.value();
 }
 
-Evaluator buildEvaluator(const Scenario& scenario) {
-    return Evaluator(buildWorld(scenario), Clock());
+std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario, const Settings& settings) {
+    return std::unique_ptr<IEvaluator>(new Evaluator(buildWorld(scenario), Clock(), settings));
 }
 
 }  // namespace core

@@ -4,6 +4,8 @@
 set(HEADERS
   include/core/clock.h
   include/core/accumulator.h
+  include/core/ini.h
+  include/core/settings.h
   include/core/control_signal.h
   include/core/system.h
   include/core/crops.h
@@ -15,6 +17,8 @@ set(HEADERS
 )
 
 add_library(core STATIC
+  src/ini.cpp
+  src/settings.cpp
   src/scenario.cpp
   src/world.cpp
   src/evaluator.cpp

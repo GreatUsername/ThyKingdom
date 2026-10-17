@@ -1,20 +1,13 @@
 #include "core/scenario.h"
 
-#include <fstream>
+#include <vector>
 
-// File-local helpers. 'static' gives internal linkage without wrapping them in an
-// unnamed namespace: same effect, one less construct.
-static std::string trim(const std::string& s) {
-    const char* ws = " \t\r\n";
-    const std::size_t b = s.find_first_not_of(ws);
-    if (b == std::string::npos) {
-        return std::string();
-    }
-    const std::size_t e = s.find_last_not_of(ws);
-    return s.substr(b, e - b + 1);
-}
+#include "core/ini.h"
 
-static bool parseI64(const std::string& s, std::int64_t& out) {
+namespace core {
+namespace {
+
+bool parseI64(const std::string& s, std::int64_t& out) {
     if (s.empty()) {
         return false;
     }
@@ -38,62 +31,23 @@ static bool parseI64(const std::string& s, std::int64_t& out) {
     return true;
 }
 
-namespace core {
+}  // namespace
 
 bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
-    std::ifstream in(path.c_str());
-    if (!in) {
-        error = "cannot open " + path;
+    std::vector<IniEntry> entries;
+    std::string parse_error;
+    if (!parseIni(path, entries, parse_error)) {
+        error = parse_error;
         return false;
     }
 
-    std::string section;
-    std::string line;
-    int line_no = 0;
-
-    while (std::getline(in, line)) {
-        ++line_no;
-
-        // A BOM is not content. Scenario files get edited in Notepad and in
-        // PowerShell, both of which can prepend one, and a BOM must not turn the
-        // first line into a syntax error.
-        if (line_no == 1 && line.size() >= 3
-            && static_cast<unsigned char>(line[0]) == 0xEF
-            && static_cast<unsigned char>(line[1]) == 0xBB
-            && static_cast<unsigned char>(line[2]) == 0xBF) {
-            line.erase(0, 3);
-        }
-
-        const std::size_t comment = line.find('#');
-        if (comment != std::string::npos) {
-            line.erase(comment);
-        }
-        line = trim(line);
-        if (line.empty()) {
-            continue;
-        }
-
-        if (line.front() == '[' && line.back() == ']') {
-            section = trim(line.substr(1, line.size() - 2));
-            continue;
-        }
-
-        const std::size_t eq = line.find('=');
-        if (eq == std::string::npos) {
-            error = "line " + std::to_string(line_no) + ": expected 'key = value'";
-            return false;
-        }
-
-        const std::string key = trim(line.substr(0, eq));
-        const std::string value = trim(line.substr(eq + 1));
-
+    for (const auto& e : entries) {
+        const std::string full = e.section + "." + e.key;
         std::int64_t iv = 0;
-        if (!parseI64(value, iv)) {
-            error = "line " + std::to_string(line_no) + ": '" + value + "' is not an integer";
+        if (!parseI64(e.value, iv)) {
+            error = "line " + std::to_string(e.line) + ": '" + e.value + "' is not an integer";
             return false;
         }
-
-        const std::string full = section + "." + key;
         if (full == "scenario.seed") {
             out.seed = static_cast<std::uint64_t>(iv);
         } else if (full == "state.crop_rate") {
@@ -105,7 +59,7 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
         } else if (full == "expect.hash") {
             out.expect_hash = static_cast<std::uint64_t>(iv);
         } else {
-            error = "line " + std::to_string(line_no) + ": unknown key '" + full + "'";
+            error = "line " + std::to_string(e.line) + ": unknown key '" + full + "'";
             return false;
         }
     }
