@@ -11,33 +11,22 @@ void World::addSystem(std::unique_ptr<System> system) {
     }
 }
 
-void World::step(std::int64_t dt_us) {
-    // Time advances first, then systems compute the state at the new instant.
-    // Systems that need absolute time read it from the clock they are handed.
-    m_clock.advance(dt_us);
+void World::step(Clock& clock, std::int64_t dt_us) {
     for (const auto& system : m_systems) {
-        system->step(m_clock, dt_us);
+        system->step(clock, dt_us);
     }
 }
 
-std::uint64_t World::hash() const {
-    Hash64 h;
-    h.mixI64(m_clock.now_us());
+void World::hash(Hash64& h) const {
     for (const auto& system : m_systems) {
         system->hash(h);
     }
     h.mixU64(m_rng.state());
-    return h.value();
 }
 
 World buildWorld(const Scenario& scenario) {
     World world;
-
-    // The order of addSystem calls is the order systems run in, and it has to be
-    // stated once, here, rather than emerge from however the systems were
-    // written. Concrete order is still open in 06; with one system it is trivial.
     world.addSystem(std::unique_ptr<System>(new CropSystem(scenario.crop_rate)));
-
     world.rng().reseed(scenario.seed, 1);
     return world;
 }

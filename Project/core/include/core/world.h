@@ -1,21 +1,21 @@
-// The world: a functional class that computes the in-game systems.
+// The World: the simulated entities and nothing else.
 //
-// It owns the clock and the subsystems, and it is the only thing that decides the
-// order in which systems run. It holds no scenario data: parameters arrive in a
-// Scenario and are consumed by buildWorld, so a world does not remember how it was
-// born.
+// No clock, no time, no control. The world does not know that time is passing; it
+// is told to step, and it steps its systems in the order they were added. Whoever
+// owns time - the Evaluator - owns the run.
 #pragma once
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 
-#include "core/clock.h"
+#include "core/hash.h"
 #include "core/rng.h"
 #include "core/system.h"
 
 namespace core {
 
+class Clock;
 struct Scenario;
 
 class World {
@@ -27,27 +27,27 @@ public:
     // break replay, so it is deliberately not part of the step loop.
     void addSystem(std::unique_ptr<System> system);
 
-    void step(std::int64_t dt_us);
+    // The clock arrives already advanced: systems compute the state of the new
+    // instant, and read absolute time from it when their formulas need it.
+    void step(Clock& clock, std::int64_t dt_us);
 
-    // Covers the world, not the run: the clock first, then every system in
-    // insertion order, then the world-level RNG. Step count and dt are absent on
-    // purpose, so two runs of the same span are comparable.
-    std::uint64_t hash() const;
+    // Mixes in this world's state: every system in insertion order, then the
+    // world-level RNG. The caller owns the outer hash and decides what else goes
+    // in, so the world never needs to know that a clock exists.
+    void hash(Hash64& h) const;
 
-    const Clock& clock() const { return m_clock; }
     const std::vector<std::unique_ptr<System>>& systems() const { return m_systems; }
     Rng& rng() { return m_rng; }
     const Rng& rng() const { return m_rng; }
 
 private:
-    Clock m_clock;
     Rng m_rng;
     std::vector<std::unique_ptr<System>> m_systems;
 };
 
-// The generating mechanism: reads the scenario, creates the clock and the
-// systems, initialises them from the given data, and returns a world ready to
-// step. Everything that makes one run differ from another lives here.
+// Creates the world and its systems from the scenario, in a declared order. The
+// order of addSystem calls IS the order systems run in, and it is stated once,
+// here, rather than emerging from however the systems were written.
 World buildWorld(const Scenario& scenario);
 
 }  // namespace core

@@ -9,7 +9,9 @@
 #include <string>
 
 #include "core/clock.h"
+#include "core/control_signal.h"
 #include "core/crops.h"
+#include "core/evaluator.h"
 #include "core/hash.h"
 #include "core/rng.h"
 #include "core/scenario.h"
@@ -42,12 +44,12 @@ static void report(bool ok, const char* file, int line, const char* what,
     report((static_cast<long long>(a) == static_cast<long long>(b)), __FILE__, __LINE__, \
            #a " == " #b, static_cast<long long>(a), static_cast<long long>(b), true)
 
-// A world with just the crop subsystem, for tests that need a specific rate.
-static World worldWith(std::int64_t crop_rate, std::uint64_t seed = 0) {
+// A run with just the crop subsystem, for tests that need a specific rate.
+static Evaluator evaluatorWith(std::int64_t crop_rate, std::uint64_t seed = 0) {
     Scenario sc;
     sc.seed = seed;
     sc.crop_rate = crop_rate;
-    return buildWorld(sc);
+    return buildEvaluator(sc);
 }
 
 static const CropSystem* crops(const World& w) {
@@ -58,6 +60,8 @@ static const CropSystem* crops(const World& w) {
     }
     return nullptr;
 }
+
+static const CropSystem* crops(const Evaluator& ev) { return crops(ev.world()); }
 
 // --- calendar -------------------------------------------------------------
 
@@ -91,28 +95,44 @@ static void testCalendar() {
     CHECK_EQ(next.hour, 0);
 }
 
-// --- clock ----------------------------------------------------------------
+// --- the evaluator owns time ----------------------------------------------
 
 static void testClock() {
-    World w = worldWith(0);
+    Evaluator ev = evaluatorWith(0);
     const std::int64_t dt = 1000;  // 1 ms
     for (int i = 0; i < 1000; ++i) {
-        w.step(dt);
+        ev.advance(dt);
     }
-    CHECK_EQ(w.clock().now_us(), 1000 * dt);
+    CHECK_EQ(ev.clock().now_us(), 1000 * dt);
+}
+
+// Signals land on a boundary, not in the middle of a step.
+static void testSignalsApplyOnBoundary() {
+    Evaluator ev = evaluatorWith(0);
+    ev.pushSignal(ControlSignal());
+    ev.pushSignal(ControlSignal());
+    CHECK_EQ(ev.pendingSignals(), 2u);
+    ev.advance(1000);
+    CHECK_EQ(ev.pendingSignals(), 0u);
+
+    // The intake does not disturb the state: with no command fields, a run with
+    // signals and a run without must be the same run.
+    Evaluator quiet = evaluatorWith(0);
+    quiet.advance(1000);
+    CHECK_EQ(ev.hash(), quiet.hash());
 }
 
 // --- accumulation is independent of how the span is split ------------------
 
 static std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int64_t dt_us) {
-    World w = worldWith(rate);
+    Evaluator ev = evaluatorWith(rate);
     std::int64_t done = 0;
     while (done < total_us) {
         const std::int64_t step = std::min(dt_us, total_us - done);
-        w.step(step);
+        ev.advance(step);
         done += step;
     }
-    const CropSystem* c = crops(w);
+    const CropSystem* c = crops(ev);
     return c != nullptr ? c->grown() : -1;
 }
 
@@ -138,14 +158,14 @@ static void testDtInvariance() {
     const std::int64_t total = 3 * kUsPerDay;
 
     auto run = [total](std::int64_t dt) {
-        World w = worldWith(987654, 42);
+        Evaluator ev = evaluatorWith(987654, 42);
         std::int64_t done = 0;
         while (done < total) {
             const std::int64_t step = std::min(dt, total - done);
-            w.step(step);
+            ev.advance(step);
             done += step;
         }
-        return w.hash();
+        return ev.hash();
     };
 
     const std::uint64_t once = run(total);
@@ -156,11 +176,11 @@ static void testDtInvariance() {
 }
 
 static void testDeterminism() {
-    World a = worldWith(500, 7);
-    World b = worldWith(500, 7);
+    Evaluator a = evaluatorWith(500, 7);
+    Evaluator b = evaluatorWith(500, 7);
     for (int i = 0; i < 1000; ++i) {
-        a.step(333);
-        b.step(333);
+        a.advance(333);
+        b.advance(333);
     }
     CHECK_EQ(a.hash(), b.hash());
 }
@@ -168,31 +188,31 @@ static void testDeterminism() {
 // --- the hash must actually cover the state -------------------------------
 
 static void testHashSensitivity() {
-    CHECK_EQ(worldWith(0, 0).hash(), worldWith(0, 0).hash());
+    CHECK_EQ(evaluatorWith(0, 0).hash(), evaluatorWith(0, 0).hash());
 
     // The clock is covered.
-    World timed = worldWith(0, 0);
-    timed.step(1);
-    CHECK(worldWith(0, 0).hash() != timed.hash());
+    Evaluator timed = evaluatorWith(0, 0);
+    timed.advance(1);
+    CHECK(evaluatorWith(0, 0).hash() != timed.hash());
 
     // The whole part of growth is covered: same clock, same carry, different
     // whole.
-    World grown = worldWith(1000000, 0);
-    grown.step(1000000);  // one whole unit
-    World still = worldWith(0, 0);
-    still.step(1000000);  // no growth at all
+    Evaluator grown = evaluatorWith(1000000, 0);
+    grown.advance(1000000);  // one whole unit
+    Evaluator still = evaluatorWith(0, 0);
+    still.advance(1000000);  // no growth at all
     CHECK(grown.hash() != still.hash());
 
     // The carry is covered on its own: same clock, same whole (zero), different
     // fraction.
-    World carry_one = worldWith(1, 0);
-    carry_one.step(1);
-    World carry_two = worldWith(2, 0);
-    carry_two.step(1);
+    Evaluator carry_one = evaluatorWith(1, 0);
+    carry_one.advance(1);
+    Evaluator carry_two = evaluatorWith(2, 0);
+    carry_two.advance(1);
     CHECK(carry_one.hash() != carry_two.hash());
 
     // The world RNG is covered.
-    CHECK(worldWith(0, 1).hash() != worldWith(0, 2).hash());
+    CHECK(evaluatorWith(0, 1).hash() != evaluatorWith(0, 2).hash());
 }
 
 // --- scenarios ------------------------------------------------------------
@@ -266,26 +286,26 @@ static void testRngIsReproducible() {
     CHECK(c.next() != d.next());
 }
 
-// --- the builder produces what the scenario asked for ---------------------
+// --- the generating mechanism --------------------------------------------
 
-static void testBuildWorld() {
+static void testBuildEvaluator() {
     Scenario sc;
     sc.seed = 99;
     sc.crop_rate = 250;
-    World w = buildWorld(sc);
+    Evaluator ev = buildEvaluator(sc);
 
-    CHECK_EQ(w.systems().size(), 1u);
-    CHECK(crops(w) != nullptr);
-    if (crops(w) != nullptr) {
-        CHECK_EQ(crops(w)->grown(), 0);
+    CHECK_EQ(ev.world().systems().size(), 1u);
+    CHECK(crops(ev) != nullptr);
+    if (crops(ev) != nullptr) {
+        CHECK_EQ(crops(ev)->grown(), 0);
     }
-    CHECK_EQ(w.clock().now_us(), 0);
+    CHECK_EQ(ev.clock().now_us(), 0);
 
     // The seed reaches the world RNG, which is what makes two runs of the same
     // scenario identical and two different seeds differ.
-    CHECK_EQ(buildWorld(sc).hash(), w.hash());
+    CHECK_EQ(buildEvaluator(sc).hash(), ev.hash());
     sc.seed = 100;
-    CHECK(buildWorld(sc).hash() != w.hash());
+    CHECK(buildEvaluator(sc).hash() != ev.hash());
 }
 
 int main(int argc, char** argv) {
@@ -295,6 +315,7 @@ int main(int argc, char** argv) {
 
     testCalendar();
     testClock();
+    testSignalsApplyOnBoundary();
     testAccumulationExactness();
     testDtInvariance();
     testDeterminism();
@@ -303,7 +324,7 @@ int main(int argc, char** argv) {
     testScenarioRejectsUnknownKey();
     testScenarioToleratesBom();
     testRngIsReproducible();
-    testBuildWorld();
+    testBuildEvaluator();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -1,32 +1,32 @@
 // Headless scenario runner.
 //
-// The pipeline is short on purpose: parse the scenario, build a world from it,
-// step the world, print its hash. Everything the tests need, a bug report needs
+// The pipeline is short on purpose: parse the scenario, build an evaluator from
+// it, advance it, print the hash. Everything the tests need, a bug report needs
 // too.
 #include <cstdio>
 #include <cstring>
 #include <string>
 
 #include "core/clock.h"
+#include "core/evaluator.h"
 #include "core/scenario.h"
-#include "core/world.h"
 
-static void printJson(const core::Scenario& sc, const core::World& w, std::uint64_t hash,
+static void printJson(const core::Scenario& sc, const core::Evaluator& ev, std::uint64_t hash,
                       bool match) {
-    const core::CalendarDate d = core::toCalendar(w.clock().now_us());
+    const core::CalendarDate d = core::toCalendar(ev.clock().now_us());
     std::printf(
         "{\"hash\":%llu,\"now_us\":%lld,\"steps\":%lld,\"dt_us\":%lld,"
         "\"year\":%lld,\"month\":%d,\"day\":%d,\"hour\":%d,"
         "\"systems\":%zu,\"expect\":%llu,\"match\":%s}\n",
         static_cast<unsigned long long>(hash),
-        static_cast<long long>(w.clock().now_us()),
+        static_cast<long long>(ev.clock().now_us()),
         static_cast<long long>(sc.steps),
         static_cast<long long>(sc.dt_us),
         static_cast<long long>(d.year),
         d.month,
         d.day,
         d.hour,
-        w.systems().size(),
+        ev.world().systems().size(),
         static_cast<unsigned long long>(sc.expect_hash),
         match ? "true" : "false");
 }
@@ -51,16 +51,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    core::World world = core::buildWorld(scenario);
+    core::Evaluator ev = core::buildEvaluator(scenario);
     for (std::int64_t i = 0; i < scenario.steps; ++i) {
-        world.step(scenario.dt_us);
+        ev.advance(scenario.dt_us);
     }
 
-    const std::uint64_t hash = world.hash();
+    const std::uint64_t hash = ev.hash();
     const bool match = (scenario.expect_hash == 0) || (hash == scenario.expect_hash);
 
     if (json) {
-        printJson(scenario, world, hash, match);
+        printJson(scenario, ev, hash, match);
     } else {
         std::printf("%016llx\n", static_cast<unsigned long long>(hash));
     }

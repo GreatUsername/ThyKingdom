@@ -4,9 +4,11 @@
 set(HEADERS
   include/core/clock.h
   include/core/accumulator.h
+  include/core/control_signal.h
   include/core/system.h
   include/core/crops.h
   include/core/world.h
+  include/core/evaluator.h
   include/core/hash.h
   include/core/rng.h
   include/core/scenario.h
@@ -15,6 +17,7 @@ set(HEADERS
 add_library(core STATIC
   src/scenario.cpp
   src/world.cpp
+  src/evaluator.cpp
   ${HEADERS}
 )
 
