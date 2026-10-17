@@ -1,19 +1,34 @@
-// Game time and calendar.
+// The game clock.
 //
 // Game time is an integer count of microseconds since the start of year 1.
 // Integers rather than floating point: the world state has to be hashable and
 // reproducible, and an integer clock is exactly that.
 //
-// The calendar is deliberately simple: 12 months of 30 days, 24 hours a day,
-// 360 days a year (OD-31). Every conversion is exact integer arithmetic, with no
-// month-length table and no leap years. If real month lengths are ever wanted,
-// the month table becomes data; the clock stays integer.
+// Systems never read machine time. They read this, which is why a run can be
+// replayed: the clock is the only source of "now" in the simulation.
 #pragma once
 
 #include <cstdint>
 
 namespace core {
 
+class Clock {
+public:
+    Clock() = default;
+    explicit Clock(std::int64_t now_us) : m_now_us(now_us) {}
+
+    std::int64_t now_us() const { return m_now_us; }
+    void advance(std::int64_t dt_us) { m_now_us += dt_us; }
+
+private:
+    std::int64_t m_now_us = 0;
+};
+
+// Calendar conversion lives beside the clock because it is the same quantity
+// seen differently: 12 months of 30 days, 24 hours a day, 360 days a year
+// (OD-31). Exact integer arithmetic, no month-length table, no leap years. If
+// real month lengths are ever wanted, the month table becomes data; the clock
+// stays integer.
 constexpr std::int64_t kUsPerSecond = 1'000'000;
 constexpr std::int64_t kUsPerMinute = 60 * kUsPerSecond;
 constexpr std::int64_t kUsPerHour = 60 * kUsPerMinute;

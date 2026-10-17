@@ -8,10 +8,11 @@
 #include <cstdio>
 #include <string>
 
+#include "core/clock.h"
+#include "core/crops.h"
 #include "core/hash.h"
 #include "core/rng.h"
 #include "core/scenario.h"
-#include "core/time.h"
 #include "core/world.h"
 
 // A test translation unit pulling the core in unqualified is deliberate: it keeps
@@ -40,6 +41,23 @@ static void report(bool ok, const char* file, int line, const char* what,
 #define CHECK_EQ(a, b) \
     report((static_cast<long long>(a) == static_cast<long long>(b)), __FILE__, __LINE__, \
            #a " == " #b, static_cast<long long>(a), static_cast<long long>(b), true)
+
+// A world with just the crop subsystem, for tests that need a specific rate.
+static World worldWith(std::int64_t crop_rate, std::uint64_t seed = 0) {
+    Scenario sc;
+    sc.seed = seed;
+    sc.crop_rate = crop_rate;
+    return buildWorld(sc);
+}
+
+static const CropSystem* crops(const World& w) {
+    for (const auto& system : w.systems()) {
+        if (const auto* c = dynamic_cast<const CropSystem*>(system.get())) {
+            return c;
+        }
+    }
+    return nullptr;
+}
 
 // --- calendar -------------------------------------------------------------
 
@@ -76,26 +94,26 @@ static void testCalendar() {
 // --- clock ----------------------------------------------------------------
 
 static void testClock() {
-    World w;
+    World w = worldWith(0);
     const std::int64_t dt = 1000;  // 1 ms
     for (int i = 0; i < 1000; ++i) {
         w.step(dt);
     }
-    CHECK_EQ(w.now_us, 1000 * dt);
+    CHECK_EQ(w.clock().now_us(), 1000 * dt);
 }
 
 // --- accumulation is independent of how the span is split ------------------
 
 static std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int64_t dt_us) {
-    World w;
-    w.crop_rate = rate;
+    World w = worldWith(rate);
     std::int64_t done = 0;
     while (done < total_us) {
         const std::int64_t step = std::min(dt_us, total_us - done);
         w.step(step);
         done += step;
     }
-    return w.crop.whole;
+    const CropSystem* c = crops(w);
+    return c != nullptr ? c->grown() : -1;
 }
 
 static void testAccumulationExactness() {
@@ -120,10 +138,7 @@ static void testDtInvariance() {
     const std::int64_t total = 3 * kUsPerDay;
 
     auto run = [total](std::int64_t dt) {
-        World w;
-        w.seed = 42;
-        w.crop_rate = 987654;
-        w.rng.reseed(42, 1);
+        World w = worldWith(987654, 42);
         std::int64_t done = 0;
         while (done < total) {
             const std::int64_t step = std::min(dt, total - done);
@@ -141,11 +156,8 @@ static void testDtInvariance() {
 }
 
 static void testDeterminism() {
-    World a;
-    a.seed = 7;
-    a.crop_rate = 500;
-    a.rng.reseed(7, 1);
-    World b = a;
+    World a = worldWith(500, 7);
+    World b = worldWith(500, 7);
     for (int i = 0; i < 1000; ++i) {
         a.step(333);
         b.step(333);
@@ -156,24 +168,31 @@ static void testDeterminism() {
 // --- the hash must actually cover the state -------------------------------
 
 static void testHashSensitivity() {
-    const World base;
-    CHECK_EQ(base.hash(), World().hash());
+    CHECK_EQ(worldWith(0, 0).hash(), worldWith(0, 0).hash());
 
-    World t = base;
-    t.now_us = 1;
-    CHECK(base.hash() != t.hash());
+    // The clock is covered.
+    World timed = worldWith(0, 0);
+    timed.step(1);
+    CHECK(worldWith(0, 0).hash() != timed.hash());
 
-    World c = base;
-    c.crop.whole = 1;
-    CHECK(base.hash() != c.hash());
+    // The whole part of growth is covered: same clock, same carry, different
+    // whole.
+    World grown = worldWith(1000000, 0);
+    grown.step(1000000);  // one whole unit
+    World still = worldWith(0, 0);
+    still.step(1000000);  // no growth at all
+    CHECK(grown.hash() != still.hash());
 
-    World k = base;
-    k.crop.carry = 1;
-    CHECK(base.hash() != k.hash());
+    // The carry is covered on its own: same clock, same whole (zero), different
+    // fraction.
+    World carry_one = worldWith(1, 0);
+    carry_one.step(1);
+    World carry_two = worldWith(2, 0);
+    carry_two.step(1);
+    CHECK(carry_one.hash() != carry_two.hash());
 
-    World r = base;
-    r.rng.reseed(7, 1);
-    CHECK(base.hash() != r.hash());
+    // The world RNG is covered.
+    CHECK(worldWith(0, 1).hash() != worldWith(0, 2).hash());
 }
 
 // --- scenarios ------------------------------------------------------------
@@ -247,6 +266,28 @@ static void testRngIsReproducible() {
     CHECK(c.next() != d.next());
 }
 
+// --- the builder produces what the scenario asked for ---------------------
+
+static void testBuildWorld() {
+    Scenario sc;
+    sc.seed = 99;
+    sc.crop_rate = 250;
+    World w = buildWorld(sc);
+
+    CHECK_EQ(w.systems().size(), 1u);
+    CHECK(crops(w) != nullptr);
+    if (crops(w) != nullptr) {
+        CHECK_EQ(crops(w)->grown(), 0);
+    }
+    CHECK_EQ(w.clock().now_us(), 0);
+
+    // The seed reaches the world RNG, which is what makes two runs of the same
+    // scenario identical and two different seeds differ.
+    CHECK_EQ(buildWorld(sc).hash(), w.hash());
+    sc.seed = 100;
+    CHECK(buildWorld(sc).hash() != w.hash());
+}
+
 int main(int argc, char** argv) {
     if (argc > 1) {
         g_scenario_dir = argv[1];
@@ -262,6 +303,7 @@ int main(int argc, char** argv) {
     testScenarioRejectsUnknownKey();
     testScenarioToleratesBom();
     testRngIsReproducible();
+    testBuildWorld();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

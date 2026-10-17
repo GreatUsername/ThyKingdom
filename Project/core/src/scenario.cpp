@@ -40,14 +40,6 @@ static bool parseI64(const std::string& s, std::int64_t& out) {
 
 namespace core {
 
-World Scenario::makeWorld() const {
-    World w;
-    w.seed = seed;
-    w.crop_rate = crop_rate;
-    w.rng.reseed(seed, 1);
-    return w;
-}
-
 bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
     std::ifstream in(path.c_str());
     if (!in) {

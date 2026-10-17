@@ -2,15 +2,19 @@
 # that mentions only its .cpp files shows no headers in an IDE, which makes the
 # project look empty.
 set(HEADERS
-  include/core/time.h
+  include/core/clock.h
+  include/core/accumulator.h
+  include/core/system.h
+  include/core/crops.h
+  include/core/world.h
   include/core/hash.h
   include/core/rng.h
-  include/core/world.h
   include/core/scenario.h
 )
 
 add_library(core STATIC
   src/scenario.cpp
+  src/world.cpp
   ${HEADERS}
 )
 
