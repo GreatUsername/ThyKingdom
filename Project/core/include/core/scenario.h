@@ -15,9 +15,7 @@
 #include <cstdint>
 #include <string>
 
-#include "tk/world.h"
-
-namespace tk {
+#include "core/world.h"
 
 struct Scenario {
     std::uint64_t seed = 0;
@@ -34,5 +32,3 @@ struct Scenario {
 // silently ignored typo in a scenario would produce a green test that tests
 // nothing.
 bool loadScenario(const std::string& path, Scenario& out, std::string& error);
-
-}  // namespace tk

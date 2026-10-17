@@ -1,11 +1,8 @@
-#include "tk/scenario.h"
+#include "core/scenario.h"
 
 #include <fstream>
 
-namespace tk {
-namespace {
-
-std::string trim(const std::string& s) {
+static std::string trim(const std::string& s) {
     const char* ws = " \t\r\n";
     const std::size_t b = s.find_first_not_of(ws);
     if (b == std::string::npos) {
@@ -15,7 +12,7 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
-bool parseI64(const std::string& s, std::int64_t& out) {
+static bool parseI64(const std::string& s, std::int64_t& out) {
     if (s.empty()) {
         return false;
     }
@@ -38,8 +35,6 @@ bool parseI64(const std::string& s, std::int64_t& out) {
     out = negative ? -value : value;
     return true;
 }
-
-}  // namespace
 
 World Scenario::makeWorld() const {
     World w;
@@ -129,5 +124,3 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
     }
     return true;
 }
-
-}  // namespace tk

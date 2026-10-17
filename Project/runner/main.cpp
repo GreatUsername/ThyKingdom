@@ -7,13 +7,11 @@
 #include <cstring>
 #include <string>
 
-#include "tk/scenario.h"
-#include "tk/time.h"
+#include "core/scenario.h"
+#include "core/time.h"
 
-namespace {
-
-void printJson(const tk::Scenario& sc, const tk::World& w, std::uint64_t hash, bool match) {
-    const tk::CalendarDate d = tk::toCalendar(w.now_us);
+static void printJson(const Scenario& sc, const World& w, std::uint64_t hash, bool match) {
+    const CalendarDate d = toCalendar(w.now_us);
     std::printf(
         "{\"hash\":%llu,\"now_us\":%lld,\"steps\":%lld,\"dt_us\":%lld,"
         "\"year\":%lld,\"month\":%d,\"day\":%d,\"hour\":%d,"
@@ -32,8 +30,6 @@ void printJson(const tk::Scenario& sc, const tk::World& w, std::uint64_t hash, b
         match ? "true" : "false");
 }
 
-}  // namespace
-
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::printf("usage: %s <scenario> [--json]\n", argv[0]);
@@ -47,14 +43,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    tk::Scenario sc;
+    Scenario sc;
     std::string error;
-    if (!tk::loadScenario(argv[1], sc, error)) {
+    if (!loadScenario(argv[1], sc, error)) {
         std::fprintf(stderr, "scenario error: %s\n", error.c_str());
         return 1;
     }
 
-    tk::World w = sc.makeWorld();
+    World w = sc.makeWorld();
     for (std::int64_t i = 0; i < sc.steps; ++i) {
         w.step(sc.dt_us);
     }

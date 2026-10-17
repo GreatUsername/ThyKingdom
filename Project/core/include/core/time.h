@@ -12,8 +12,6 @@
 
 #include <cstdint>
 
-namespace tk {
-
 constexpr std::int64_t kUsPerSecond = 1'000'000;
 constexpr std::int64_t kUsPerMinute = 60 * kUsPerSecond;
 constexpr std::int64_t kUsPerHour = 60 * kUsPerMinute;
@@ -61,5 +59,3 @@ inline std::int64_t fromCalendar(const CalendarDate& d) {
          + static_cast<std::int64_t>(d.second) * kUsPerSecond
          + d.microsecond;
 }
-
-}  // namespace tk

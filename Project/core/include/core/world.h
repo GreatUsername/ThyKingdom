@@ -8,17 +8,17 @@
 
 #include <cstdint>
 
-#include "tk/hash.h"
-#include "tk/rng.h"
-
-namespace tk {
+#include "core/hash.h"
+#include "core/rng.h"
 
 // Accumulates a rate over time without losing the fractional part.
 //
 // The carry is what makes the total independent of how the span was split into
-// steps: sum over any split equals the same total. Removing it would make the
+// steps: the sum over any split equals the same total. Removing it would make the
 // result depend on dt, which is exactly the failure OD-33 is about.
 struct Accumulator {
+    static constexpr std::int64_t kMicro = 1'000'000;
+
     std::int64_t whole = 0;
     std::int64_t carry = 0;  // micro-units, 0..999999
 
@@ -29,8 +29,6 @@ struct Accumulator {
         whole += num / kMicro;
         carry = num % kMicro;
     }
-
-    static constexpr std::int64_t kMicro = 1'000'000;
 };
 
 struct World {
@@ -58,5 +56,3 @@ struct World {
         return h.value();
     }
 };
-
-}  // namespace tk

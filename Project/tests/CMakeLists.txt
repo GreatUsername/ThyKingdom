@@ -1,7 +1,7 @@
-add_executable(tk_tests main.cpp)
-target_link_libraries(tk_tests PRIVATE tk_core)
-target_compile_definitions(tk_tests PRIVATE
-  TK_SCENARIO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../scenarios"
-)
+add_executable(tests main.cpp)
+target_link_libraries(tests PRIVATE core)
 
-add_test(NAME tk_tests COMMAND tk_tests)
+# The scenario directory is passed as an argument rather than compiled in with a
+# macro: one less define, and the binary can be pointed at another set of
+# scenarios without a rebuild.
+add_test(NAME tests COMMAND tests "${CMAKE_CURRENT_SOURCE_DIR}/../scenarios")

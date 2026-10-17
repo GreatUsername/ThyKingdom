@@ -8,59 +8,50 @@
 #include <cstdio>
 #include <string>
 
-#include "tk/hash.h"
-#include "tk/rng.h"
-#include "tk/scenario.h"
-#include "tk/time.h"
-#include "tk/world.h"
+#include "core/hash.h"
+#include "core/rng.h"
+#include "core/scenario.h"
+#include "core/time.h"
+#include "core/world.h"
 
-#ifndef TK_SCENARIO_DIR
-#define TK_SCENARIO_DIR "scenarios"
-#endif
+static int g_checks = 0;
+static int g_failures = 0;
+static std::string g_scenario_dir = "scenarios";
 
-namespace {
-
-int g_checks = 0;
-int g_failures = 0;
-
-void report(bool ok, const char* file, int line, const char* what,
-            long long a, long long b, bool twoValues) {
+static void report(bool ok, const char* file, int line, const char* what,
+                   long long a, long long b, bool two_values) {
     ++g_checks;
     if (ok) {
         return;
     }
     ++g_failures;
-    if (twoValues) {
+    if (two_values) {
         std::printf("FAIL %s:%d  %s  (%lld vs %lld)\n", file, line, what, a, b);
     } else {
         std::printf("FAIL %s:%d  %s\n", file, line, what);
     }
 }
 
-}  // namespace
-
 #define CHECK(cond) report((cond), __FILE__, __LINE__, #cond, 0, 0, false)
 #define CHECK_EQ(a, b) \
     report((static_cast<long long>(a) == static_cast<long long>(b)), __FILE__, __LINE__, \
            #a " == " #b, static_cast<long long>(a), static_cast<long long>(b), true)
 
-namespace {
-
 // --- calendar -------------------------------------------------------------
 
-void testCalendar() {
-    CHECK_EQ(tk::fromCalendar(tk::CalendarDate{1, 1, 1, 0, 0, 0, 0}), 0);
-    CHECK_EQ(tk::kUsPerDay, 86400000000LL);
-    CHECK_EQ(tk::kUsPerYear, 31104000000000LL);
+static void testCalendar() {
+    CHECK_EQ(fromCalendar(CalendarDate{1, 1, 1, 0, 0, 0, 0}), 0);
+    CHECK_EQ(kUsPerDay, 86400000000LL);
+    CHECK_EQ(kUsPerYear, 31104000000000LL);
 
     // Month boundary: 30 days is the whole of month 1, and 12 * 30 = 360 a year.
-    const tk::CalendarDate month = tk::toCalendar(30 * tk::kUsPerDay);
+    const CalendarDate month = toCalendar(30 * kUsPerDay);
     CHECK_EQ(month.month, 2);
     CHECK_EQ(month.day, 1);
 
     // Last instant of year 1.
-    const std::int64_t last = tk::kUsPerYear - 1;
-    const tk::CalendarDate end = tk::toCalendar(last);
+    const std::int64_t last = kUsPerYear - 1;
+    const CalendarDate end = toCalendar(last);
     CHECK_EQ(end.year, 1);
     CHECK_EQ(end.month, 12);
     CHECK_EQ(end.day, 30);
@@ -68,10 +59,10 @@ void testCalendar() {
     CHECK_EQ(end.minute, 59);
     CHECK_EQ(end.second, 59);
     CHECK_EQ(end.microsecond, 999999);
-    CHECK_EQ(tk::fromCalendar(end), last);
+    CHECK_EQ(fromCalendar(end), last);
 
     // First instant of year 2.
-    const tk::CalendarDate next = tk::toCalendar(tk::kUsPerYear);
+    const CalendarDate next = toCalendar(kUsPerYear);
     CHECK_EQ(next.year, 2);
     CHECK_EQ(next.month, 1);
     CHECK_EQ(next.day, 1);
@@ -80,8 +71,8 @@ void testCalendar() {
 
 // --- clock ----------------------------------------------------------------
 
-void testClock() {
-    tk::World w;
+static void testClock() {
+    World w;
     const std::int64_t dt = 1000;  // 1 ms
     for (int i = 0; i < 1000; ++i) {
         w.step(dt);
@@ -91,8 +82,8 @@ void testClock() {
 
 // --- accumulation is independent of how the span is split ------------------
 
-std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int64_t dt_us) {
-    tk::World w;
+static std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int64_t dt_us) {
+    World w;
     w.crop_rate = rate;
     std::int64_t done = 0;
     while (done < total_us) {
@@ -103,9 +94,9 @@ std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int64_t dt
     return w.crop.whole;
 }
 
-void testAccumulationExactness() {
+static void testAccumulationExactness() {
     const std::int64_t rate = 123457;  // micro-units per second
-    const std::int64_t total = 7 * tk::kUsPerDay;
+    const std::int64_t total = 7 * kUsPerDay;
     const std::int64_t expected = rate * total / 1000000;
 
     CHECK_EQ(grownOver(rate, total, total), expected);
@@ -115,17 +106,17 @@ void testAccumulationExactness() {
     // Finest possible split, but over a span small enough to actually run: one
     // microsecond at a time for one second is a million steps, not six hundred
     // billion. The invariance claim does not depend on the span's size.
-    const std::int64_t one_second = tk::kUsPerSecond;
+    const std::int64_t one_second = kUsPerSecond;
     CHECK_EQ(grownOver(rate, one_second, 1), rate * one_second / 1000000);
 }
 
 // --- the headline test: the same span at any dt gives the same state -------
 
-void testDtInvariance() {
-    const std::int64_t total = 3 * tk::kUsPerDay;
+static void testDtInvariance() {
+    const std::int64_t total = 3 * kUsPerDay;
 
     auto run = [total](std::int64_t dt) {
-        tk::World w;
+        World w;
         w.seed = 42;
         w.crop_rate = 987654;
         w.rng.reseed(42, 1);
@@ -145,12 +136,12 @@ void testDtInvariance() {
     CHECK_EQ(run(1000000), once);  // one second at a time
 }
 
-void testDeterminism() {
-    tk::World a;
+static void testDeterminism() {
+    World a;
     a.seed = 7;
     a.crop_rate = 500;
     a.rng.reseed(7, 1);
-    tk::World b = a;
+    World b = a;
     for (int i = 0; i < 1000; ++i) {
         a.step(333);
         b.step(333);
@@ -160,34 +151,34 @@ void testDeterminism() {
 
 // --- the hash must actually cover the state -------------------------------
 
-void testHashSensitivity() {
-    const tk::World base;
-    CHECK_EQ(base.hash(), tk::World().hash());
+static void testHashSensitivity() {
+    const World base;
+    CHECK_EQ(base.hash(), World().hash());
 
-    tk::World t = base;
+    World t = base;
     t.now_us = 1;
     CHECK(base.hash() != t.hash());
 
-    tk::World c = base;
+    World c = base;
     c.crop.whole = 1;
     CHECK(base.hash() != c.hash());
 
-    tk::World k = base;
+    World k = base;
     k.crop.carry = 1;
     CHECK(base.hash() != k.hash());
 
-    tk::World r = base;
+    World r = base;
     r.rng.reseed(7, 1);
     CHECK(base.hash() != r.hash());
 }
 
 // --- scenarios ------------------------------------------------------------
 
-void testScenarioLoading() {
-    const std::string path = std::string(TK_SCENARIO_DIR) + "/skeleton.scn";
-    tk::Scenario sc;
+static void testScenarioLoading() {
+    const std::string path = g_scenario_dir + "/skeleton.scn";
+    Scenario sc;
     std::string error;
-    const bool ok = tk::loadScenario(path, sc, error);
+    const bool ok = loadScenario(path, sc, error);
     if (!ok) {
         std::printf("FAIL cannot load %s: %s\n", path.c_str(), error.c_str());
     }
@@ -200,7 +191,7 @@ void testScenarioLoading() {
     CHECK(sc.seed == 1);
 }
 
-void testScenarioRejectsUnknownKey() {
+static void testScenarioRejectsUnknownKey() {
     const std::string path = "tmp_bad_scenario.scn";
     {
         std::FILE* f = std::fopen(path.c_str(), "wb");
@@ -211,14 +202,14 @@ void testScenarioRejectsUnknownKey() {
         std::fputs("[run]\nsteps = 1\ndt_us = 1\nnonsense = 5\n", f);
         std::fclose(f);
     }
-    tk::Scenario sc;
+    Scenario sc;
     std::string error;
-    const bool ok = tk::loadScenario(path, sc, error);
+    const bool ok = loadScenario(path, sc, error);
     CHECK(!ok);
     std::remove(path.c_str());
 }
 
-void testScenarioToleratesBom() {
+static void testScenarioToleratesBom() {
     const std::string path = "tmp_bom_scenario.scn";
     {
         std::FILE* f = std::fopen(path.c_str(), "wb");
@@ -229,9 +220,9 @@ void testScenarioToleratesBom() {
         std::fputs("\xEF\xBB\xBF[run]\nsteps = 2\ndt_us = 5\n", f);
         std::fclose(f);
     }
-    tk::Scenario sc;
+    Scenario sc;
     std::string error;
-    const bool ok = tk::loadScenario(path, sc, error);
+    const bool ok = loadScenario(path, sc, error);
     if (!ok) {
         std::printf("FAIL bom scenario rejected: %s\n", error.c_str());
     }
@@ -241,20 +232,22 @@ void testScenarioToleratesBom() {
     std::remove(path.c_str());
 }
 
-void testRngIsReproducible() {
-    tk::Rng a(123, 1);
-    tk::Rng b(123, 1);
+static void testRngIsReproducible() {
+    Rng a(123, 1);
+    Rng b(123, 1);
     for (int i = 0; i < 16; ++i) {
         CHECK_EQ(a.next(), b.next());
     }
-    tk::Rng c(123, 2);
-    tk::Rng d(123, 1);
+    Rng c(123, 2);
+    Rng d(123, 1);
     CHECK(c.next() != d.next());
 }
 
-}  // namespace
+int main(int argc, char** argv) {
+    if (argc > 1) {
+        g_scenario_dir = argv[1];
+    }
 
-int main() {
     testCalendar();
     testClock();
     testAccumulationExactness();

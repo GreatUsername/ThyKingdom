@@ -2,15 +2,13 @@
 //
 // Mechanic 114: the seed composition decides the character of a unit. A seed
 // taken from the unit's guid gives a stable personality; a seed taken from guid
-// and time gives a changing mood. Both are reproducible, which is the whole point
-// of OD-34.
+// and time gives a changing mood. Both are reproducible, which is the point of
+// OD-34.
 //
 // Deliberately NOT advanced once per step: see World::step.
 #pragma once
 
 #include <cstdint>
-
-namespace tk {
 
 class Rng {
 public:
@@ -43,5 +41,3 @@ private:
     std::uint64_t m_state = 0;
     std::uint64_t m_inc = 1;
 };
-
-}  // namespace tk
