@@ -11,6 +11,8 @@
 #include "core/hash.h"
 #include "core/rng.h"
 
+namespace core {
+
 // Accumulates a rate over time without losing the fractional part.
 //
 // The carry is what makes the total independent of how the span was split into
@@ -56,3 +58,5 @@ struct World {
         return h.value();
     }
 };
+
+}  // namespace core

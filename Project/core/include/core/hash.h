@@ -10,6 +10,8 @@
 
 #include <cstdint>
 
+namespace core {
+
 class Hash64 {
 public:
     void mixU64(std::uint64_t v) {
@@ -29,3 +31,5 @@ private:
 
     std::uint64_t m_value = kOffset;
 };
+
+}  // namespace core

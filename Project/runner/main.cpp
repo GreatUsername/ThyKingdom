@@ -10,8 +10,9 @@
 #include "core/scenario.h"
 #include "core/time.h"
 
-static void printJson(const Scenario& sc, const World& w, std::uint64_t hash, bool match) {
-    const CalendarDate d = toCalendar(w.now_us);
+static void printJson(const core::Scenario& sc, const core::World& w, std::uint64_t hash,
+                      bool match) {
+    const core::CalendarDate d = core::toCalendar(w.now_us);
     std::printf(
         "{\"hash\":%llu,\"now_us\":%lld,\"steps\":%lld,\"dt_us\":%lld,"
         "\"year\":%lld,\"month\":%d,\"day\":%d,\"hour\":%d,"
@@ -43,14 +44,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    Scenario sc;
+    core::Scenario sc;
     std::string error;
-    if (!loadScenario(argv[1], sc, error)) {
+    if (!core::loadScenario(argv[1], sc, error)) {
         std::fprintf(stderr, "scenario error: %s\n", error.c_str());
         return 1;
     }
 
-    World w = sc.makeWorld();
+    core::World w = sc.makeWorld();
     for (std::int64_t i = 0; i < sc.steps; ++i) {
         w.step(sc.dt_us);
     }

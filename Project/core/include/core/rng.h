@@ -10,6 +10,8 @@
 
 #include <cstdint>
 
+namespace core {
+
 class Rng {
 public:
     explicit Rng(std::uint64_t seed = 0, std::uint64_t stream = 1) { reseed(seed, stream); }
@@ -41,3 +43,5 @@ private:
     std::uint64_t m_state = 0;
     std::uint64_t m_inc = 1;
 };
+
+}  // namespace core

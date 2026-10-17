@@ -17,6 +17,8 @@
 
 #include "core/world.h"
 
+namespace core {
+
 struct Scenario {
     std::uint64_t seed = 0;
     std::int64_t crop_rate = 0;
@@ -32,3 +34,5 @@ struct Scenario {
 // silently ignored typo in a scenario would produce a green test that tests
 // nothing.
 bool loadScenario(const std::string& path, Scenario& out, std::string& error);
+
+}  // namespace core

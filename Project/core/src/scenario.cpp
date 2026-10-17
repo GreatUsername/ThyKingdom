@@ -2,6 +2,8 @@
 
 #include <fstream>
 
+// File-local helpers. 'static' gives internal linkage without wrapping them in an
+// unnamed namespace: same effect, one less construct.
 static std::string trim(const std::string& s) {
     const char* ws = " \t\r\n";
     const std::size_t b = s.find_first_not_of(ws);
@@ -35,6 +37,8 @@ static bool parseI64(const std::string& s, std::int64_t& out) {
     out = negative ? -value : value;
     return true;
 }
+
+namespace core {
 
 World Scenario::makeWorld() const {
     World w;
@@ -124,3 +128,5 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
     }
     return true;
 }
+
+}  // namespace core

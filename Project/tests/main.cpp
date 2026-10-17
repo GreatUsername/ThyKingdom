@@ -14,6 +14,10 @@
 #include "core/time.h"
 #include "core/world.h"
 
+// A test translation unit pulling the core in unqualified is deliberate: it keeps
+// the assertions readable. This is a .cpp, so nothing leaks into other files.
+using namespace core;
+
 static int g_checks = 0;
 static int g_failures = 0;
 static std::string g_scenario_dir = "scenarios";
