@@ -1,0 +1,21 @@
+# Walking skeleton: one crop grows at a constant rate over one game day.
+#
+# The run is one day in 86400 steps of one second each. Running the same span with
+# a different dt must produce the same hash - that is the property the tests check,
+# and the reason the expected hash below does not depend on dt.
+#
+# expect.hash: filled in from a verified run. It is a regression baseline, not a
+# specification: it changes only together with an explanation of what changed.
+
+[scenario]
+seed = 1
+
+[state]
+crop_rate = 1000
+
+[run]
+steps = 86400
+dt_us = 1000000
+
+[expect]
+hash = 3708545564401336207

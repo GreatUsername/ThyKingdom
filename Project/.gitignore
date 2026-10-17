@@ -1,0 +1,7 @@
+/build/
+/out/
+/.vs/
+/.cache/
+*.obj
+*.exe
+*.pdb

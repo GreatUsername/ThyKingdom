@@ -1,0 +1,18 @@
+# The same span as skeleton.scn, computed with a sixty-times larger step.
+#
+# Identical expected hash on purpose: this is the headline property from Codex
+# note 08. Acceleration must not change what the world becomes - only how
+# coarsely it is sampled on the way there.
+
+[scenario]
+seed = 1
+
+[state]
+crop_rate = 1000
+
+[run]
+steps = 1440
+dt_us = 60000000
+
+[expect]
+hash = 3708545564401336207
