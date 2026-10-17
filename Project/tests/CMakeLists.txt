@@ -1,5 +1,5 @@
 add_executable(tests main.cpp)
-target_link_libraries(tests PRIVATE core)
+target_link_libraries(tests PRIVATE core config)
 
 # The scenario directory is passed as an argument rather than compiled in with a
 # macro: one less define, and the binary can be pointed at another set of

@@ -6,8 +6,7 @@
 
 namespace core {
 
-Evaluator::Evaluator(World world, Clock clock, Settings settings)
-    : m_clock(clock), m_world(std::move(world)), m_settings(std::move(settings)) {}
+Evaluator::Evaluator(World world, Clock clock) : m_clock(clock), m_world(std::move(world)) {}
 
 void Evaluator::pushSignal(const ControlSignal& signal) {
     m_pending.push_back(signal);
@@ -52,8 +51,8 @@ std::uint64_t Evaluator::hash() const {
     return h.value();
 }
 
-std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario, const Settings& settings) {
-    return std::unique_ptr<IEvaluator>(new Evaluator(buildWorld(scenario), Clock(), settings));
+std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario) {
+    return std::unique_ptr<IEvaluator>(new Evaluator(buildWorld(scenario), Clock()));
 }
 
 }  // namespace core

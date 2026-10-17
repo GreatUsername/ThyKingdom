@@ -1,13 +1,14 @@
-#include "core/settings.h"
+#include "config/settings.h"
 
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <vector>
 
 #include "core/ini.h"
 
-namespace core {
+namespace config {
 namespace {
 
 bool toInt(const std::string& s, int& out) {
@@ -46,9 +47,9 @@ bool operator==(const Settings& a, const Settings& b) {
 }
 
 bool loadSettings(const std::string& path, Settings& out, std::string& error) {
-    std::vector<IniEntry> entries;
+    std::vector<core::IniEntry> entries;
     std::string parse_error;
-    if (!parseIni(path, entries, parse_error)) {
+    if (!core::parseIni(path, entries, parse_error)) {
         // No file is normal; an unreadable-but-present file is not.
         std::ifstream probe(path.c_str());
         if (!probe) {
@@ -108,4 +109,4 @@ bool saveSettings(const std::string& path, const Settings& settings, std::string
     return true;
 }
 
-}  // namespace core
+}  // namespace config

@@ -1,20 +1,20 @@
 // Gameplay options: what the player configured in the settings menu.
 //
-// These are read at launch and written back by the menu, so they live in a file of
-// their own and outlive a run. They are the player's preferences, not the world's
-// state, and the Evaluator may read them.
+// These are the player's preferences, not the world's state. They are read at
+// launch, written back by the menu, and they outlive any run. Changing them
+// happens while the game is paused or not running at all, so nothing in the
+// simulation needs to react to a change.
 //
-// One rule matters more than the fields: a setting that changed the outcome of a
-// simulation would break replay (OD-34), because the run record contains the
-// scenario and the signals, not the settings. So presentation options stay out of
-// the simulation, and the test suite asserts that two runs with different settings
-// produce the same hash. If a setting ever *should* affect the outcome, it belongs
-// in the scenario, where a replay can see it.
+// The layering is the point: this header lives in the config library, which core
+// does not depend on. A simulation file cannot name Settings, so a presentation
+// option cannot reach the world and cannot break replay (OD-34). If an option
+// ever *should* affect the outcome, it stops being a setting and becomes part of
+// the scenario, where the run record can see it.
 #pragma once
 
 #include <string>
 
-namespace core {
+namespace config {
 
 struct Settings {
     // Presentation.
@@ -37,4 +37,4 @@ bool loadSettings(const std::string& path, Settings& out, std::string& error);
 
 bool saveSettings(const std::string& path, const Settings& settings, std::string& error);
 
-}  // namespace core
+}  // namespace config

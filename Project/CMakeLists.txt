@@ -18,6 +18,13 @@ endif()
 
 enable_testing()
 
+# core is the simulation and depends on nothing but the standard library.
 add_subdirectory(core)
+
+# config is application preferences. It depends on core only for the tiny INI
+# reader; core never depends on config, which is what makes it impossible for a
+# player setting to reach the simulation.
+add_subdirectory(config)
+
 add_subdirectory(runner)
 add_subdirectory(tests)

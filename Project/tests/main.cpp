@@ -15,8 +15,8 @@
 #include "core/evaluator.h"
 #include "core/hash.h"
 #include "core/rng.h"
+#include "config/settings.h"
 #include "core/scenario.h"
-#include "core/settings.h"
 #include "core/world.h"
 
 // A test translation unit pulling the core in unqualified is deliberate: it keeps
@@ -48,12 +48,11 @@ static void report(bool ok, const char* file, int line, const char* what,
 
 // A run with just the crop subsystem, for tests that need a specific rate.
 static std::unique_ptr<IEvaluator> evaluatorWith(std::int64_t crop_rate,
-                                                 std::uint64_t seed = 0,
-                                                 const Settings& settings = Settings()) {
+                                                 std::uint64_t seed = 0) {
     Scenario sc;
     sc.seed = seed;
     sc.crop_rate = crop_rate;
-    return buildEvaluator(sc, settings);
+    return buildEvaluator(sc);
 }
 
 static const CropSystem* crops(const World& w) {
@@ -242,35 +241,15 @@ static void testHashSensitivity() {
     CHECK(evaluatorWith(0, 1)->hash() != evaluatorWith(0, 2)->hash());
 }
 
-// --- settings must never reach the simulation -----------------------------
-
-static void testSettingsDoNotAffectSimulation() {
-    Settings plain;
-
-    Settings loud;
-    loud.brightness = 20;
-    loud.master_volume = 100;
-    loud.fullscreen = true;
-    loud.key_pause = "P";
-    loud.key_accelerate = "F5";
-    loud.key_end_turn = "E";
-
-    std::unique_ptr<IEvaluator> a = evaluatorWith(987654, 42, plain);
-    std::unique_ptr<IEvaluator> b = evaluatorWith(987654, 42, loud);
-    for (int i = 0; i < 500; ++i) {
-        a->advance(13000);
-        b->advance(13000);
-    }
-
-    // If this ever fails, a presentation option reached the world and replay is
-    // broken (OD-34). The fix is to move that option into the scenario, not to
-    // relax the test.
-    CHECK_EQ(a->hash(), b->hash());
-    CHECK(a->settings() != b->settings());
-}
+// --- settings live outside the simulation ---------------------------------
+//
+// There is no longer a test asserting that a setting cannot reach the world,
+// because the compiler now guarantees it: Settings lives in the config library,
+// which core does not depend on. A file in core cannot name the type. That is a
+// stronger guarantee than a test, and it cannot rot.
 
 static void testSettingsRoundTrip() {
-    Settings original;
+    config::Settings original;
     original.brightness = 35;
     original.fullscreen = true;
     original.master_volume = 55;
@@ -280,22 +259,22 @@ static void testSettingsRoundTrip() {
 
     const std::string path = "tmp_settings.ini";
     std::string error;
-    CHECK(saveSettings(path, original, error));
+    CHECK(config::saveSettings(path, original, error));
 
-    Settings loaded;
-    CHECK(loadSettings(path, loaded, error));
+    config::Settings loaded;
+    CHECK(config::loadSettings(path, loaded, error));
     CHECK(loaded == original);
     std::remove(path.c_str());
 }
 
 static void testSettingsMissingFileIsDefaults() {
-    Settings loaded;
+    config::Settings loaded;
     loaded.brightness = 7;  // prove it is overwritten only if the file exists
     std::string error;
     // A missing file is "no preferences saved yet", not a failure.
-    CHECK(loadSettings("tmp_does_not_exist_settings.ini", loaded, error));
+    CHECK(config::loadSettings("tmp_does_not_exist_settings.ini", loaded, error));
     CHECK_EQ(loaded.brightness, 7);  // untouched
-    Settings defaults;
+    config::Settings defaults;
     CHECK_EQ(defaults.brightness, 100);
     CHECK_EQ(defaults.master_volume, 80);
 }
@@ -311,9 +290,9 @@ static void testSettingsRejectsUnknownKey() {
         std::fputs("[graphics]\nnonsense = 5\n", f);
         std::fclose(f);
     }
-    Settings loaded;
+    config::Settings loaded;
     std::string error;
-    CHECK(!loadSettings(path, loaded, error));
+    CHECK(!config::loadSettings(path, loaded, error));
     std::remove(path.c_str());
 }
 
@@ -394,7 +373,7 @@ static void testBuildEvaluator() {
     Scenario sc;
     sc.seed = 99;
     sc.crop_rate = 250;
-    std::unique_ptr<IEvaluator> ev = buildEvaluator(sc, Settings());
+    std::unique_ptr<IEvaluator> ev = buildEvaluator(sc);
 
     CHECK_EQ(ev->world().systems().size(), 1u);
     CHECK(crops(*ev) != nullptr);
@@ -406,9 +385,9 @@ static void testBuildEvaluator() {
 
     // The seed reaches the world RNG, which is what makes two runs of the same
     // scenario identical and two different seeds differ.
-    CHECK_EQ(buildEvaluator(sc, Settings())->hash(), ev->hash());
+    CHECK_EQ(buildEvaluator(sc)->hash(), ev->hash());
     sc.seed = 100;
-    CHECK(buildEvaluator(sc, Settings())->hash() != ev->hash());
+    CHECK(buildEvaluator(sc)->hash() != ev->hash());
 }
 
 int main(int argc, char** argv) {
@@ -424,7 +403,6 @@ int main(int argc, char** argv) {
     testDtInvariance();
     testDeterminism();
     testHashSensitivity();
-    testSettingsDoNotAffectSimulation();
     testSettingsRoundTrip();
     testSettingsMissingFileIsDefaults();
     testSettingsRejectsUnknownKey();

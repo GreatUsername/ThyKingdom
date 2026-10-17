@@ -5,10 +5,15 @@
 // only simulated entities and knows nothing about time or control - the clock is
 // state-control duty, so it belongs to whoever controls state.
 //
-// The abstract base exists so that the runner and, later, the UI talk to the run
-// through a narrow interface rather than a concrete class. It is deliberately thin:
-// what would vary between implementations is when advance() is called (a timer, a
-// batch sweep, a replay), not what a step does.
+// It does not know about player settings. Those are changed while the game is
+// paused or not running, and they never affect the simulation, so the evaluator has
+// nothing to do with them; the config library holds them and core cannot see it.
+//
+// The abstract base exists so that the runner and, later, the UI talk to a run
+// through a narrow interface rather than a concrete class, and so that tests can
+// drive a run in ways the real evaluator would not: several runs in one process,
+// unusual orderings, artificial step patterns. It is deliberately thin - what
+// varies between implementations is when advance() is called, not what a step does.
 #pragma once
 
 #include <cstddef>
@@ -19,7 +24,6 @@
 #include "core/clock.h"
 #include "core/control_signal.h"
 #include "core/hash.h"
-#include "core/settings.h"
 #include "core/world.h"
 
 namespace core {
@@ -51,12 +55,11 @@ public:
 
     virtual Mode mode() const = 0;
     virtual std::int64_t accelerationRemaining_us() const = 0;
-    virtual const Settings& settings() const = 0;
 };
 
 class Evaluator final : public IEvaluator {
 public:
-    Evaluator(World world, Clock clock, Settings settings);
+    Evaluator(World world, Clock clock);
 
     void advance(std::int64_t dt_us) override;
     void pushSignal(const ControlSignal& signal) override;
@@ -68,14 +71,12 @@ public:
 
     Mode mode() const override { return m_mode; }
     std::int64_t accelerationRemaining_us() const override { return m_acceleration_remaining_us; }
-    const Settings& settings() const override { return m_settings; }
 
 private:
     void applyPendingSignals();
 
     Clock m_clock;
     World m_world;
-    Settings m_settings;
     std::vector<ControlSignal> m_pending;
 
     Mode m_mode = Mode::Normal;
@@ -84,6 +85,6 @@ private:
 
 // The generating mechanism: creates the clock, builds the world and its systems,
 // and returns a run ready to advance.
-std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario, const Settings& settings);
+std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario);
 
 }  // namespace core

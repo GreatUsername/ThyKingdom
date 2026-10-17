@@ -1,8 +1,7 @@
 // Headless scenario runner.
 //
-// The pipeline is short on purpose: parse the scenario, load the player's settings,
-// build an evaluator, advance it, print the hash. Everything the tests need, a bug
-// report needs too.
+// This is a development tool, not the game: it drives the simulation with no
+// picture and no settings. Everything the tests need, a bug report needs too.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -10,7 +9,6 @@
 #include "core/clock.h"
 #include "core/evaluator.h"
 #include "core/scenario.h"
-#include "core/settings.h"
 
 static void printJson(const core::Scenario& sc, const core::IEvaluator& ev, std::uint64_t hash,
                       bool match) {
@@ -36,17 +34,14 @@ static void printJson(const core::Scenario& sc, const core::IEvaluator& ev, std:
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::printf("usage: %s <scenario> [--json] [--settings <file>]\n", argv[0]);
+        std::printf("usage: %s <scenario> [--json]\n", argv[0]);
         return 2;
     }
 
     bool json = false;
-    std::string settings_path;
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--json") == 0) {
             json = true;
-        } else if (std::strcmp(argv[i], "--settings") == 0 && i + 1 < argc) {
-            settings_path = argv[++i];
         }
     }
 
@@ -57,15 +52,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // No --settings means no saved preferences yet, which is not an error: the
-    // defaults stand.
-    core::Settings settings;
-    if (!settings_path.empty() && !core::loadSettings(settings_path, settings, error)) {
-        std::fprintf(stderr, "settings error: %s\n", error.c_str());
-        return 1;
-    }
-
-    std::unique_ptr<core::IEvaluator> ev = core::buildEvaluator(scenario, settings);
+    std::unique_ptr<core::IEvaluator> ev = core::buildEvaluator(scenario);
     for (std::int64_t i = 0; i < scenario.steps; ++i) {
         ev->advance(scenario.dt_us);
     }
