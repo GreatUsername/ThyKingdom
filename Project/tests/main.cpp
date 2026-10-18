@@ -19,6 +19,8 @@
 #include "core/scenario.h"
 #include "core/world.h"
 #include "runtime/scheduler.h"
+#include "runtime/time_source.h"
+#include "runtime/timer.h"
 
 // A test translation unit pulling the core in unqualified is deliberate: it keeps
 // the assertions readable. This is a .cpp, so nothing leaks into other files.
@@ -431,6 +433,93 @@ static void testPacingCapsLongStall() {
     CHECK_EQ(scheduler.pending_us(), 0);
 }
 
+// --- the timer: late binding, pacing, and acceleration --------------------
+
+// Synthetic time instead of sleeps. What we want to assert is arithmetic, not the
+// scheduler of the operating system.
+class FakeTimeSource final : public runtime::TimeSource {
+public:
+    std::int64_t now_us() const override { return m_now_us; }
+    void sleep_us(std::int64_t us) override {
+        if (us > 0) {
+            m_now_us += us;
+            m_slept_us += us;
+        }
+    }
+    void advance(std::int64_t us) { m_now_us += us; }
+    std::int64_t slept_us() const { return m_slept_us; }
+
+private:
+    std::int64_t m_now_us = 0;
+    std::int64_t m_slept_us = 0;
+};
+
+static void testTimerNeedsAttaching() {
+    FakeTimeSource time;
+    runtime::Timer timer(runtime::Scheduler(20000), time);
+
+    time.advance(100000);  // five steps' worth of real time went by
+    CHECK_EQ(timer.poll(100), 0);  // nobody to step yet
+    CHECK(!timer.attached());
+
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
+    timer.attach(ev.get());
+    CHECK(timer.attached());
+
+    // Time that passed before attaching is not owed to the evaluator.
+    CHECK_EQ(timer.poll(100), 0);
+    CHECK_EQ(ev->clock().now_us(), 0);
+}
+
+static void testTimerRunsDueSteps() {
+    FakeTimeSource time;
+    runtime::Timer timer(runtime::Scheduler(20000), time);
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
+    timer.attach(ev.get());
+
+    time.advance(20000);
+    CHECK_EQ(timer.poll(100), 1);
+    CHECK_EQ(ev->clock().now_us(), 20000);
+    CHECK_EQ(ev->stepsTaken(), 1);
+
+    time.advance(30000);  // one and a half steps
+    CHECK_EQ(timer.poll(100), 1);
+    CHECK_EQ(ev->clock().now_us(), 40000);
+    CHECK_EQ(timer.scheduler().pending_us(), 10000);
+}
+
+static void testTimerWaitsForTheNextStep() {
+    FakeTimeSource time;
+    runtime::Timer timer(runtime::Scheduler(20000), time);
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
+    timer.attach(ev.get());
+
+    timer.waitForNextStep();  // nothing has elapsed yet: sleeps the whole step
+    CHECK_EQ(time.slept_us(), 20000);
+
+    time.advance(5000);
+    timer.poll(100);          // not enough for a step; 5000 us sits in the remainder
+    timer.waitForNextStep();  // so only 15000 more is needed
+    CHECK_EQ(time.slept_us(), 35000);
+}
+
+static void testTimerDoesNotPaceAcceleration() {
+    FakeTimeSource time;
+    runtime::Timer timer(runtime::Scheduler(20000), time);
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
+    timer.attach(ev.get());
+
+    ev->pushSignal(ControlSignal{SignalKind::BeginAcceleration, 1000000});
+    time.advance(20000);
+    CHECK_EQ(timer.poll(100), 1);
+    CHECK(ev->mode() == Mode::Accelerating);
+
+    // Acceleration is not paced by real time: the timer must not sleep.
+    const std::int64_t before = time.slept_us();
+    timer.waitForNextStep();
+    CHECK_EQ(time.slept_us(), before);
+}
+
 // --- the generating mechanism --------------------------------------------
 
 static void testBuildEvaluator() {
@@ -478,6 +567,10 @@ int main(int argc, char** argv) {
     testPacingIgnoresChunking();
     testPacingKeepsRemainder();
     testPacingCapsLongStall();
+    testTimerNeedsAttaching();
+    testTimerRunsDueSteps();
+    testTimerWaitsForTheNextStep();
+    testTimerDoesNotPaceAcceleration();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
