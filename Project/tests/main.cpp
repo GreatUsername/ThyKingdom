@@ -18,6 +18,7 @@
 #include "config/settings.h"
 #include "core/scenario.h"
 #include "core/world.h"
+#include "runtime/scheduler.h"
 
 // A test translation unit pulling the core in unqualified is deliberate: it keeps
 // the assertions readable. This is a .cpp, so nothing leaks into other files.
@@ -42,9 +43,16 @@ static void report(bool ok, const char* file, int line, const char* what,
 }
 
 #define CHECK(cond) report((cond), __FILE__, __LINE__, #cond, 0, 0, false)
+// Each argument is evaluated exactly once. The earlier version evaluated it twice -
+// once for the comparison, once for the failure message - which broke silently as
+// soon as an argument had a side effect, such as consuming a due step.
 #define CHECK_EQ(a, b) \
-    report((static_cast<long long>(a) == static_cast<long long>(b)), __FILE__, __LINE__, \
-           #a " == " #b, static_cast<long long>(a), static_cast<long long>(b), true)
+    do { \
+        const long long check_a_value_ = static_cast<long long>(a); \
+        const long long check_b_value_ = static_cast<long long>(b); \
+        report((check_a_value_ == check_b_value_), __FILE__, __LINE__, \
+               #a " == " #b, check_a_value_, check_b_value_, true); \
+    } while (false)
 
 // A run with just the crop subsystem, for tests that need a specific rate.
 static std::unique_ptr<IEvaluator> evaluatorWith(std::int64_t crop_rate,
@@ -367,6 +375,62 @@ static void testRngIsReproducible() {
     CHECK(c.next() != d.next());
 }
 
+// --- pacing: the step rate is the simulation's, not the display's ---------
+
+static void testPacingIgnoresChunking() {
+    // One minute of real time, at dt = 20 ms, delivered in three different chunk
+    // patterns. The total number of steps must be identical: it depends on elapsed
+    // time and dt, not on how often the caller woke up.
+    const std::int64_t dt = 20000;
+    const std::int64_t total = 60 * 1000000;
+
+    auto run = [dt, total](std::int64_t chunk) {
+        runtime::Scheduler scheduler(dt);
+        std::int64_t elapsed = 0;
+        std::int64_t steps = 0;
+        while (elapsed < total) {
+            const std::int64_t slice = std::min(chunk, total - elapsed);
+            scheduler.addElapsed(slice);
+            elapsed += slice;
+            steps += scheduler.takeDueSteps(100000);
+        }
+        return steps;
+    };
+
+    const std::int64_t even = run(dt);              // exactly one step per wake-up
+    CHECK_EQ(even, total / dt);
+    CHECK_EQ(run(6944), even);                      // ~144 Hz wake-ups
+    CHECK_EQ(run(16667), even);                     // ~60 Hz wake-ups
+    CHECK_EQ(run(1000), even);                      // 1000 Hz wake-ups
+    CHECK_EQ(run(total), even);                     // one single wake-up
+}
+
+static void testPacingKeepsRemainder() {
+    runtime::Scheduler scheduler(20000);
+    // Wake up 144 times for one second's worth of real time.
+    for (int i = 0; i < 144; ++i) {
+        scheduler.addElapsed(6944);
+    }
+    const std::int64_t steps = scheduler.takeDueSteps(1000);
+    CHECK_EQ(steps, 49);              // 999 936 us / 20 000 = 49 whole steps
+    CHECK_EQ(scheduler.pending_us(), 19936);  // nothing lost
+
+    // One more wake-up completes the fiftieth step.
+    scheduler.addElapsed(6944);
+    CHECK_EQ(scheduler.takeDueSteps(1000), 1);
+    CHECK_EQ(scheduler.pending_us(), 6880);
+}
+
+static void testPacingCapsLongStall() {
+    runtime::Scheduler scheduler(20000);
+    scheduler.addElapsed(10 * 1000000);  // ten seconds of stall
+    const std::int64_t steps = scheduler.takeDueSteps(3);
+    CHECK_EQ(steps, 3);
+    // The rest is dropped, not queued: the game falls behind real time rather than
+    // spending longer catching up than it stalled.
+    CHECK_EQ(scheduler.pending_us(), 0);
+}
+
 // --- the generating mechanism --------------------------------------------
 
 static void testBuildEvaluator() {
@@ -411,6 +475,9 @@ int main(int argc, char** argv) {
     testScenarioToleratesBom();
     testRngIsReproducible();
     testBuildEvaluator();
+    testPacingIgnoresChunking();
+    testPacingKeepsRemainder();
+    testPacingCapsLongStall();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

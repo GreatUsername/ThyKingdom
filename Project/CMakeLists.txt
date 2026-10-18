@@ -26,5 +26,9 @@ add_subdirectory(core)
 # player setting to reach the simulation.
 add_subdirectory(config)
 
+# runtime is everything that touches the machine: pacing now, threads later. It sits
+# above core, never below it.
+add_subdirectory(runtime)
+
 add_subdirectory(runner)
 add_subdirectory(tests)
