@@ -3,6 +3,9 @@
 // No clock, no time, no control. The world does not know that time is passing; it
 // is told to step, and it steps its systems in the order they were added. Whoever
 // owns time - the Evaluator - owns the run.
+//
+// A world is built by the evaluator that owns it, and there is no public factory:
+// see buildWorld in evaluator.cpp.
 #pragma once
 
 #include <cstdint>
@@ -16,15 +19,14 @@
 namespace core {
 
 class Clock;
-struct Scenario;
 
 class World {
 public:
     World() = default;
 
-    // Construction time only. Systems are added by buildWorld before the first
-    // step; adding one mid-run would change the result of a run in flight and
-    // break replay, so it is deliberately not part of the step loop.
+    // Construction time only. Systems are added while the world is being built,
+    // before the first step; adding one mid-run would change the result of a run
+    // in flight and break replay, so it is deliberately not part of the step loop.
     void addSystem(std::unique_ptr<System> system);
 
     // The clock arrives already advanced: systems compute the state of the new
@@ -44,10 +46,5 @@ private:
     Rng m_rng;
     std::vector<std::unique_ptr<System>> m_systems;
 };
-
-// Creates the world and its systems from the scenario, in a declared order. The
-// order of addSystem calls IS the order systems run in, and it is stated once,
-// here, rather than emerging from however the systems were written.
-World buildWorld(const Scenario& scenario);
 
 }  // namespace core

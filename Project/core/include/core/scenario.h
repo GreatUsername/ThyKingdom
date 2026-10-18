@@ -1,8 +1,8 @@
 // A run description: the parsed, validated data a run is created from.
 //
-// This is data and nothing else. It is the input to buildWorld and the runner's
-// own parameters (how many steps, how long each one, what hash to expect). A world
-// is created from it and keeps none of it.
+// This is data and nothing else. It is the input the evaluator builds a world from,
+// and it also carries the runner's own parameters (how many steps, how long each
+// one, what hash to expect). A world is created from it and keeps none of it.
 //
 // One file serves four purposes: a test, a bug report, a replay and a balance run
 // (Codex note 08). Cheap now, expensive later, and reproducibility is what OD-34

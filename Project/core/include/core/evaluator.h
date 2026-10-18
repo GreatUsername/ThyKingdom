@@ -59,7 +59,11 @@ public:
 
 class Evaluator final : public IEvaluator {
 public:
-    Evaluator(World world, Clock clock);
+    // The world is built in place, inside the evaluator that owns it. Nothing is
+    // constructed elsewhere and handed over: the member is initialised directly
+    // from the builder, and C++17 guaranteed copy elision means the object is
+    // constructed in that member, not in a temporary that then gets moved.
+    explicit Evaluator(const Scenario& scenario);
 
     void advance(std::int64_t dt_us) override;
     void pushSignal(const ControlSignal& signal) override;

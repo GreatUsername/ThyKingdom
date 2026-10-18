@@ -1,8 +1,5 @@
 #include "core/world.h"
 
-#include "core/crops.h"
-#include "core/scenario.h"
-
 namespace core {
 
 void World::addSystem(std::unique_ptr<System> system) {
@@ -22,13 +19,6 @@ void World::hash(Hash64& h) const {
         system->hash(h);
     }
     h.mixU64(m_rng.state());
-}
-
-World buildWorld(const Scenario& scenario) {
-    World world;
-    world.addSystem(std::unique_ptr<System>(new CropSystem(scenario.crop_rate)));
-    world.rng().reseed(scenario.seed, 1);
-    return world;
 }
 
 }  // namespace core

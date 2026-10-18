@@ -1,12 +1,23 @@
 #include "core/evaluator.h"
 
-#include <utility>
-
+#include "core/crops.h"
 #include "core/scenario.h"
 
 namespace core {
 
-Evaluator::Evaluator(World world, Clock clock) : m_clock(clock), m_world(std::move(world)) {}
+// The generating mechanism, internal to this file.
+//
+// It is not declared in a header on purpose. A world exists inside the evaluator
+// that owns it and nowhere else, so it cannot be created by one caller and then
+// dropped by another; the only way to have one is to have an evaluator.
+static World buildWorld(const Scenario& scenario) {
+    World world;
+    world.addSystem(std::unique_ptr<System>(new CropSystem(scenario.crop_rate)));
+    world.rng().reseed(scenario.seed, 1);
+    return world;
+}
+
+Evaluator::Evaluator(const Scenario& scenario) : m_world(buildWorld(scenario)) {}
 
 void Evaluator::pushSignal(const ControlSignal& signal) {
     m_pending.push_back(signal);
@@ -52,7 +63,7 @@ std::uint64_t Evaluator::hash() const {
 }
 
 std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario) {
-    return std::unique_ptr<IEvaluator>(new Evaluator(buildWorld(scenario), Clock()));
+    return std::unique_ptr<IEvaluator>(new Evaluator(scenario));
 }
 
 }  // namespace core
