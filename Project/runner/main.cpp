@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<core::IEvaluator> ev = core::buildEvaluator(scenario);
     for (std::int64_t i = 0; i < scenario.steps; ++i) {
-        ev->advance(scenario.dt_us);
+        ev->makeStep(scenario.dt_us);
     }
 
     const std::uint64_t hash = ev->hash();

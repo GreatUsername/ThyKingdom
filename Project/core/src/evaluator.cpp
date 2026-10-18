@@ -41,7 +41,8 @@ void Evaluator::applyPendingSignals() {
     m_pending.clear();
 }
 
-void Evaluator::advance(std::int64_t dt_us) {
+void Evaluator::makeStep(std::int64_t dt_us) {
+    n_step++;
     applyPendingSignals();
     m_clock.advance(dt_us);
     m_world.step(m_clock, dt_us);

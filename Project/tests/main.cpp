@@ -104,7 +104,7 @@ static void testClock() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     const std::int64_t dt = 1000;  // 1 ms
     for (int i = 0; i < 1000; ++i) {
-        ev->advance(dt);
+        ev->makeStep(dt);
     }
     CHECK_EQ(ev->clock().now_us(), 1000 * dt);
 }
@@ -114,7 +114,7 @@ static void testSignalsApplyOnBoundary() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     ev->pushSignal(ControlSignal{SignalKind::InterruptAcceleration, 0});
     CHECK_EQ(ev->pendingSignals(), 1u);
-    ev->advance(1000);
+    ev->makeStep(1000);
     CHECK_EQ(ev->pendingSignals(), 0u);
 }
 
@@ -127,23 +127,23 @@ static void testAccelerationMode() {
     // The run is put into acceleration by a control signal, not by the caller
     // flipping a flag.
     ev->pushSignal(ControlSignal{SignalKind::BeginAcceleration, 1000});
-    ev->advance(400);
+    ev->makeStep(400);
     CHECK(ev->mode() == Mode::Accelerating);
     CHECK_EQ(ev->accelerationRemaining_us(), 600);
 
     // The span is exhausted: acceleration ends and a new turn begins (OD-14).
-    ev->advance(600);
+    ev->makeStep(600);
     CHECK(ev->mode() == Mode::Normal);
     CHECK_EQ(ev->accelerationRemaining_us(), 0);
     CHECK_EQ(ev->clock().now_us(), 1000);
 
     // An interrupt ends it early, and also on a boundary.
     ev->pushSignal(ControlSignal{SignalKind::BeginAcceleration, 100000});
-    ev->advance(10);
+    ev->makeStep(10);
     CHECK(ev->mode() == Mode::Accelerating);
     ev->pushSignal(ControlSignal{SignalKind::InterruptAcceleration, 0});
     CHECK(ev->mode() == Mode::Accelerating);  // not yet: the signal is pending
-    ev->advance(10);
+    ev->makeStep(10);
     CHECK(ev->mode() == Mode::Normal);
     CHECK_EQ(ev->accelerationRemaining_us(), 0);
 }
@@ -155,7 +155,7 @@ static std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int
     std::int64_t done = 0;
     while (done < total_us) {
         const std::int64_t step = std::min(dt_us, total_us - done);
-        ev->advance(step);
+        ev->makeStep(step);
         done += step;
     }
     const CropSystem* c = crops(*ev);
@@ -188,7 +188,7 @@ static void testDtInvariance() {
         std::int64_t done = 0;
         while (done < total) {
             const std::int64_t step = std::min(dt, total - done);
-            ev->advance(step);
+            ev->makeStep(step);
             done += step;
         }
         return ev->hash();
@@ -205,8 +205,8 @@ static void testDeterminism() {
     std::unique_ptr<IEvaluator> a = evaluatorWith(500, 7);
     std::unique_ptr<IEvaluator> b = evaluatorWith(500, 7);
     for (int i = 0; i < 1000; ++i) {
-        a->advance(333);
-        b->advance(333);
+        a->makeStep(333);
+        b->makeStep(333);
     }
     CHECK_EQ(a->hash(), b->hash());
 }
@@ -218,23 +218,23 @@ static void testHashSensitivity() {
 
     // The clock is covered.
     std::unique_ptr<IEvaluator> timed = evaluatorWith(0, 0);
-    timed->advance(1);
+    timed->makeStep(1);
     CHECK(evaluatorWith(0, 0)->hash() != timed->hash());
 
     // The whole part of growth is covered: same clock, same carry, different
     // whole.
     std::unique_ptr<IEvaluator> grown = evaluatorWith(1000000, 0);
-    grown->advance(1000000);  // one whole unit
+    grown->makeStep(1000000);  // one whole unit
     std::unique_ptr<IEvaluator> still = evaluatorWith(0, 0);
-    still->advance(1000000);  // no growth at all
+    still->makeStep(1000000);  // no growth at all
     CHECK(grown->hash() != still->hash());
 
     // The carry is covered on its own: same clock, same whole (zero), different
     // fraction.
     std::unique_ptr<IEvaluator> carry_one = evaluatorWith(1, 0);
-    carry_one->advance(1);
+    carry_one->makeStep(1);
     std::unique_ptr<IEvaluator> carry_two = evaluatorWith(2, 0);
-    carry_two->advance(1);
+    carry_two->makeStep(1);
     CHECK(carry_one->hash() != carry_two->hash());
 
     // The world RNG is covered.

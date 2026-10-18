@@ -13,7 +13,7 @@
 // through a narrow interface rather than a concrete class, and so that tests can
 // drive a run in ways the real evaluator would not: several runs in one process,
 // unusual orderings, artificial step patterns. It is deliberately thin - what
-// varies between implementations is when advance() is called, not what a step does.
+// varies between implementations is when makeStep() is called, not what a step does.
 #pragma once
 
 #include <cstddef>
@@ -42,7 +42,7 @@ public:
     virtual ~IEvaluator() = default;
 
     // One step. This is the only place simulation time moves.
-    virtual void advance(std::int64_t dt_us) = 0;
+    virtual void makeStep(std::int64_t dt_us) = 0;
     virtual void pushSignal(const ControlSignal& signal) = 0;
 
     // Signals are queued until the next boundary. How many are waiting is part of
@@ -55,6 +55,11 @@ public:
 
     virtual Mode mode() const = 0;
     virtual std::int64_t accelerationRemaining_us() const = 0;
+
+    // Run bookkeeping, not world state: how many steps have been made. It is
+    // deliberately absent from hash(), because two runs of the same span at
+    // different dt make different numbers of steps and must still hash equal.
+    virtual std::int64_t stepsTaken() const = 0;
 };
 
 class Evaluator final : public IEvaluator {
@@ -65,7 +70,7 @@ public:
     // constructed in that member, not in a temporary that then gets moved.
     explicit Evaluator(const Scenario& scenario);
 
-    void advance(std::int64_t dt_us) override;
+    void makeStep(std::int64_t dt_us) override;
     void pushSignal(const ControlSignal& signal) override;
     std::size_t pendingSignals() const override { return m_pending.size(); }
 
@@ -75,12 +80,15 @@ public:
 
     Mode mode() const override { return m_mode; }
     std::int64_t accelerationRemaining_us() const override { return m_acceleration_remaining_us; }
+    std::int64_t stepsTaken() const override { return n_step; }
 
 private:
     void applyPendingSignals();
 
     Clock m_clock;
     World m_world;
+    // Steps taken. Run bookkeeping, never hashed: see stepsTaken().
+    std::int64_t n_step = 0;
     std::vector<ControlSignal> m_pending;
 
     Mode m_mode = Mode::Normal;
