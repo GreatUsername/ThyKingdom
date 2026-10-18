@@ -4,10 +4,13 @@
 // choice is still open (note 08, question 2), and pulling one in now would make it
 // by accident. Swapping this for doctest is a one-file change.
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "core/clock.h"
 #include "core/control_signal.h"
@@ -543,35 +546,154 @@ static void testBuildEvaluator() {
     CHECK(buildEvaluator(sc)->hash() != ev->hash());
 }
 
-int main(int argc, char** argv) {
-    if (argc > 1) {
-        g_scenario_dir = argv[1];
+// --- timing ---------------------------------------------------------------
+//
+// Wall-clock numbers are reported, never asserted. A test that fails when the
+// machine is busy teaches people to ignore failures; a table that is printed on
+// every run shows a regression the moment it appears.
+
+static std::int64_t now_us() {
+    using Clock = std::chrono::steady_clock;
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               Clock::now().time_since_epoch())
+        .count();
+}
+
+struct Timing {
+    const char* name;
+    std::int64_t us;
+};
+
+struct TestEntry {
+    const char* name;
+    void (*fn)();
+};
+
+static const TestEntry kTests[] = {
+    {"calendar", testCalendar},
+    {"clock", testClock},
+    {"signals apply on boundary", testSignalsApplyOnBoundary},
+    {"acceleration mode", testAccelerationMode},
+    {"accumulation exactness", testAccumulationExactness},
+    {"dt invariance", testDtInvariance},
+    {"determinism", testDeterminism},
+    {"hash sensitivity", testHashSensitivity},
+    {"settings round trip", testSettingsRoundTrip},
+    {"settings missing file", testSettingsMissingFileIsDefaults},
+    {"settings unknown key", testSettingsRejectsUnknownKey},
+    {"scenario loading", testScenarioLoading},
+    {"scenario unknown key", testScenarioRejectsUnknownKey},
+    {"scenario BOM", testScenarioToleratesBom},
+    {"rng reproducible", testRngIsReproducible},
+    {"build evaluator", testBuildEvaluator},
+    {"pacing ignores chunking", testPacingIgnoresChunking},
+    {"pacing keeps remainder", testPacingKeepsRemainder},
+    {"pacing caps stall", testPacingCapsLongStall},
+    {"timer needs attaching", testTimerNeedsAttaching},
+    {"timer runs due steps", testTimerRunsDueSteps},
+    {"timer waits for next step", testTimerWaitsForTheNextStep},
+    {"timer skips pacing", testTimerDoesNotPaceAcceleration},
+};
+
+// Throughput of the simulation itself, and what it means for the acceleration
+// targets. OD-33 asks whether a skip can fit a watchable real time; this is the
+// number that answers it, on this machine, today.
+static void runBenchmark(std::int64_t steps) {
+    const std::int64_t dt_us = 20000;  // 50 Hz, a rate that divides a second exactly
+
+    // Warm-up: the first pass pays for page faults and cold caches.
+    {
+        std::unique_ptr<IEvaluator> warm = evaluatorWith(1000, 42);
+        for (std::int64_t i = 0; i < steps / 10 + 1; ++i) {
+            warm->makeStep(dt_us);
+        }
     }
 
-    testCalendar();
-    testClock();
-    testSignalsApplyOnBoundary();
-    testAccelerationMode();
-    testAccumulationExactness();
-    testDtInvariance();
-    testDeterminism();
-    testHashSensitivity();
-    testSettingsRoundTrip();
-    testSettingsMissingFileIsDefaults();
-    testSettingsRejectsUnknownKey();
-    testScenarioLoading();
-    testScenarioRejectsUnknownKey();
-    testScenarioToleratesBom();
-    testRngIsReproducible();
-    testBuildEvaluator();
-    testPacingIgnoresChunking();
-    testPacingKeepsRemainder();
-    testPacingCapsLongStall();
-    testTimerNeedsAttaching();
-    testTimerRunsDueSteps();
-    testTimerWaitsForTheNextStep();
-    testTimerDoesNotPaceAcceleration();
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42);
+    const std::int64_t start = now_us();
+    for (std::int64_t i = 0; i < steps; ++i) {
+        ev->makeStep(dt_us);
+    }
+    const std::int64_t elapsed = now_us() - start;
 
-    std::printf("%d checks, %d failures\n", g_checks, g_failures);
+    const double seconds = elapsed > 0 ? static_cast<double>(elapsed) / 1e6 : 1e-9;
+    const double per_second = static_cast<double>(steps) / seconds;
+
+    std::printf("\nthroughput\n");
+    std::printf("  %lld steps at dt %lld us, 1 system\n", static_cast<long long>(steps),
+                static_cast<long long>(dt_us));
+    std::printf("  wall     %.3f s\n", seconds);
+    std::printf("  rate     %.0f steps/s\n", per_second);
+    std::printf("  cost     %.4f us/step\n", seconds * 1e6 / static_cast<double>(steps));
+
+    // Hashing is not paid every step, but a test harness pays it constantly and a
+    // runner pays it at the end, so its cost is worth knowing separately.
+    const int hash_calls = 1000000;
+    std::uint64_t sink = 0;
+    const std::int64_t h0 = now_us();
+    for (int i = 0; i < hash_calls; ++i) {
+        sink += ev->hash();
+    }
+    const std::int64_t h1 = now_us();
+    std::printf("  hash     %.4f us/call (checksum %llu)\n",
+                static_cast<double>(h1 - h0) / hash_calls,
+                static_cast<unsigned long long>(sink));
+
+    std::printf("\n  what this rate buys:\n");
+    const std::int64_t spans_days[] = {7, 90};
+    for (std::int64_t days : spans_days) {
+        const std::int64_t game_us = days * 86400LL * 1000000LL;
+        const std::int64_t need = game_us / dt_us;
+        const double real_seconds = static_cast<double>(need) / per_second;
+        std::printf("    %2lld-day skip: %11lld steps -> %7.1f s real\n",
+                    static_cast<long long>(days), static_cast<long long>(need), real_seconds);
+    }
+    std::printf("    (OD-33 targets: a week in <=15 s, two or three months in <=30 s)\n");
+}
+
+int main(int argc, char** argv) {
+    std::int64_t bench_steps = 0;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--bench" && i + 1 < argc) {
+            bench_steps = std::strtoll(argv[++i], nullptr, 10);
+        } else if (arg.rfind("--", 0) != 0) {
+            g_scenario_dir = arg;
+        }
+    }
+
+    const int count = static_cast<int>(sizeof(kTests) / sizeof(kTests[0]));
+    std::vector<Timing> timings;
+    timings.reserve(static_cast<std::size_t>(count));
+
+    const std::int64_t all_start = now_us();
+    for (int i = 0; i < count; ++i) {
+        const std::int64_t t0 = now_us();
+        kTests[i].fn();
+        timings.push_back(Timing{kTests[i].name, now_us() - t0});
+    }
+    const std::int64_t all_us = now_us() - all_start;
+
+    // Slowest first: the top of this table is where to look when the suite starts
+    // dragging.
+    std::vector<Timing> sorted = timings;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const Timing& a, const Timing& b) { return a.us > b.us; });
+
+    std::printf("\nper test (slowest first)\n");
+    for (const Timing& t : sorted) {
+        const double share = all_us > 0
+                                 ? 100.0 * static_cast<double>(t.us) / static_cast<double>(all_us)
+                                 : 0.0;
+        std::printf("  %-30s %8.3f ms  %5.1f%%\n", t.name, static_cast<double>(t.us) / 1000.0,
+                    share);
+    }
+    std::printf("  %-30s %8.3f ms\n", "total", static_cast<double>(all_us) / 1000.0);
+
+    if (bench_steps > 0) {
+        runBenchmark(bench_steps);
+    }
+
+    std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
