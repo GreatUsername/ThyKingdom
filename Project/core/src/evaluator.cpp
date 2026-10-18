@@ -42,7 +42,7 @@ void Evaluator::applyPendingSignals() {
 }
 
 void Evaluator::makeStep(std::int64_t dt_us) {
-    n_step++;
+    m_step_count++;
     applyPendingSignals();
     m_clock.advance(dt_us);
     m_world.step(m_clock, dt_us);

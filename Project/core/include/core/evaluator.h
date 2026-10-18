@@ -80,7 +80,7 @@ public:
 
     Mode mode() const override { return m_mode; }
     std::int64_t accelerationRemaining_us() const override { return m_acceleration_remaining_us; }
-    std::int64_t stepsTaken() const override { return n_step; }
+    std::int64_t stepsTaken() const override { return m_step_count; }
 
 private:
     void applyPendingSignals();
@@ -88,7 +88,7 @@ private:
     Clock m_clock;
     World m_world;
     // Steps taken. Run bookkeeping, never hashed: see stepsTaken().
-    std::int64_t n_step = 0;
+    std::int64_t m_step_count = 0;
     std::vector<ControlSignal> m_pending;
 
     Mode m_mode = Mode::Normal;
