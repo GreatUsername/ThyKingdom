@@ -1,21 +1,22 @@
-# Walking skeleton: one crop grows at a constant rate over one game day.
+# Four days ending at the summer-to-autumn boundary: three days of growth, then
+# one day of withering.
 #
-# The run is one day in 86400 steps of one second each. Running the same span with
-# a different dt must produce the same hash - that is the property the tests check,
-# and the reason the expected hash below does not depend on dt.
-#
-# expect.hash: filled in from a verified run. It is a regression baseline, not a
-# specification: it changes only together with an explanation of what changed.
+# The step is one second, so the boundary at day 181 falls in the middle of a step.
+# That is the point: the system splits the step there, and the same span computed
+# with hour-long steps must produce the same hash.
 
 [scenario]
 seed = 1
 
 [state]
+start_day = 178
+crops = 8
 crop_rate = 1000
+wither_rate = 600
 
 [run]
-steps = 86400
+steps = 345600
 dt_us = 1000000
 
 [expect]
-hash = 3708545564401336207
+hash = 3842446313089821568

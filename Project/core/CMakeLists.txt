@@ -3,11 +3,12 @@
 # project look empty.
 set(HEADERS
   include/core/clock.h
+  include/core/season.h
   include/core/accumulator.h
   include/core/ini.h
   include/core/control_signal.h
   include/core/system.h
-  include/core/crops.h
+  include/core/plants.h
   include/core/world.h
   include/core/evaluator.h
   include/core/hash.h
@@ -18,8 +19,10 @@ set(HEADERS
 add_library(core STATIC
   src/ini.cpp
   src/scenario.cpp
+  src/season.cpp
   src/world.cpp
   src/evaluator.cpp
+  src/plants.cpp
   ${HEADERS}
 )
 

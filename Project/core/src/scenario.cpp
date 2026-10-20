@@ -50,8 +50,14 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
         }
         if (full == "scenario.seed") {
             out.seed = static_cast<std::uint64_t>(iv);
+        } else if (full == "state.start_day") {
+            out.start_day = iv;
+        } else if (full == "state.crops") {
+            out.crop_count = iv;
         } else if (full == "state.crop_rate") {
             out.crop_rate = iv;
+        } else if (full == "state.wither_rate") {
+            out.wither_rate = iv;
         } else if (full == "run.steps") {
             out.steps = iv;
         } else if (full == "run.dt_us") {
@@ -70,6 +76,14 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
     }
     if (out.dt_us <= 0) {
         error = "run.dt_us must be positive";
+        return false;
+    }
+    if (out.start_day < 1) {
+        error = "state.start_day must be 1 or later";
+        return false;
+    }
+    if (out.crop_count < 0) {
+        error = "state.crops must not be negative";
         return false;
     }
     return true;

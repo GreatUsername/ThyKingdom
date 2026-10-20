@@ -1,18 +1,20 @@
-# The same span as skeleton.scn, computed with a sixty-times larger step.
+# The same four days as skeleton.scn, computed with one-hour steps.
 #
-# Identical expected hash on purpose: this is the headline property from Codex
-# note 08. Acceleration must not change what the world becomes - only how
-# coarsely it is sampled on the way there.
+# Identical expected hash on purpose: acceleration must not change what the world
+# becomes, only how coarsely it is sampled on the way there.
 
 [scenario]
 seed = 1
 
 [state]
+start_day = 178
+crops = 8
 crop_rate = 1000
+wither_rate = 600
 
 [run]
-steps = 1440
-dt_us = 60000000
+steps = 96
+dt_us = 3600000000
 
 [expect]
-hash = 3708545564401336207
+hash = 3842446313089821568

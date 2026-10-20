@@ -1,6 +1,6 @@
 #include "core/evaluator.h"
 
-#include "core/crops.h"
+#include "core/plants.h"
 #include "core/scenario.h"
 
 namespace core {
@@ -12,12 +12,23 @@ namespace core {
 // dropped by another; the only way to have one is to have an evaluator.
 static World buildWorld(const Scenario& scenario) {
     World world;
-    world.addSystem(std::unique_ptr<System>(new CropSystem(scenario.crop_rate)));
+
+    // The order of addSystem calls is the order systems run in, and it is stated
+    // once, here.
+    PlantSystem* plants = new PlantSystem(scenario.crop_rate, scenario.wither_rate);
+    for (std::int64_t i = 0; i < scenario.crop_count; ++i) {
+        // A placeholder layout until the map exists: fertile cells will decide
+        // where a crop is sown.
+        plants->sow(static_cast<std::int32_t>(i % 8), static_cast<std::int32_t>(i / 8));
+    }
+    world.addSystem(std::unique_ptr<System>(plants));
+
     world.rng().reseed(scenario.seed, 1);
     return world;
 }
 
-Evaluator::Evaluator(const Scenario& scenario) : m_world(buildWorld(scenario)) {}
+Evaluator::Evaluator(const Scenario& scenario)
+    : m_clock((scenario.start_day - 1) * kUsPerDay), m_world(buildWorld(scenario)) {}
 
 void Evaluator::pushSignal(const ControlSignal& signal) {
     m_pending.push_back(signal);

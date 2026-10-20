@@ -9,8 +9,8 @@
 // rests on.
 //
 // The format is deliberately trivial - sections in brackets, "key = value" lines,
-// integers only, '#' starts a comment. It is not JSON because the core takes no
-// third-party dependencies, and Python reads and writes this just as easily.
+// '*' starts a comment. It is not JSON because the core takes no third-party
+// dependencies, and Python reads and writes this just as easily.
 //
 // The command stream will be added here before M2. It is absent now on purpose:
 // M1 has no player commands yet, and inventing a shape before there is a use for
@@ -25,7 +25,14 @@ namespace core {
 struct Scenario {
     // What the world is generated from.
     std::uint64_t seed = 0;
-    std::int64_t crop_rate = 0;
+
+    // Which day the run starts on, 1-based. Seasons follow from it.
+    std::int64_t start_day = 1;
+
+    // Crops sown at start, on a small deterministic grid until the map exists.
+    std::int64_t crop_count = 0;
+    std::int64_t crop_rate = 0;    // units per second while the season allows growth
+    std::int64_t wither_rate = 0;  // units per second taken back in autumn
 
     // What the run is.
     std::int64_t steps = 0;

@@ -12,21 +12,21 @@
 #include <string>
 #include <vector>
 
+#include "config/settings.h"
+#include "core/accumulator.h"
 #include "core/clock.h"
 #include "core/control_signal.h"
-#include "core/crops.h"
 #include "core/evaluator.h"
 #include "core/hash.h"
+#include "core/plants.h"
 #include "core/rng.h"
-#include "config/settings.h"
 #include "core/scenario.h"
+#include "core/season.h"
 #include "core/world.h"
 #include "runtime/scheduler.h"
 #include "runtime/time_source.h"
 #include "runtime/timer.h"
 
-// A test translation unit pulling the core in unqualified is deliberate: it keeps
-// the assertions readable. This is a .cpp, so nothing leaks into other files.
 using namespace core;
 
 static int g_checks = 0;
@@ -48,9 +48,8 @@ static void report(bool ok, const char* file, int line, const char* what,
 }
 
 #define CHECK(cond) report((cond), __FILE__, __LINE__, #cond, 0, 0, false)
-// Each argument is evaluated exactly once. The earlier version evaluated it twice -
-// once for the comparison, once for the failure message - which broke silently as
-// soon as an argument had a side effect, such as consuming a due step.
+// Each argument is evaluated exactly once. The earlier version evaluated it twice
+// and broke silently as soon as an argument had a side effect.
 #define CHECK_EQ(a, b) \
     do { \
         const long long check_a_value_ = static_cast<long long>(a); \
@@ -59,25 +58,40 @@ static void report(bool ok, const char* file, int line, const char* what,
                #a " == " #b, check_a_value_, check_b_value_, true); \
     } while (false)
 
-// A run with just the crop subsystem, for tests that need a specific rate.
+// A run with a set number of crops and a chosen start day.
 static std::unique_ptr<IEvaluator> evaluatorWith(std::int64_t crop_rate,
-                                                 std::uint64_t seed = 0) {
+                                                 std::uint64_t seed = 0,
+                                                 std::int64_t start_day = 1,
+                                                 std::int64_t crop_count = 1,
+                                                 std::int64_t wither_rate = 0) {
     Scenario sc;
     sc.seed = seed;
+    sc.start_day = start_day;
+    sc.crop_count = crop_count;
     sc.crop_rate = crop_rate;
+    sc.wither_rate = wither_rate;
     return buildEvaluator(sc);
 }
 
-static const CropSystem* crops(const World& w) {
+static const PlantSystem* plants(const World& w) {
     for (const auto& system : w.systems()) {
-        if (const auto* c = dynamic_cast<const CropSystem*>(system.get())) {
-            return c;
+        if (const auto* p = dynamic_cast<const PlantSystem*>(system.get())) {
+            return p;
         }
     }
     return nullptr;
 }
 
-static const CropSystem* crops(const IEvaluator& ev) { return crops(ev.world()); }
+static const PlantSystem* plants(const IEvaluator& ev) { return plants(ev.world()); }
+
+// Growth of the first crop, in whole units.
+static std::int64_t firstCropGrowth(const IEvaluator& ev) {
+    const PlantSystem* p = plants(ev);
+    if (p == nullptr || p->crops().empty()) {
+        return -1;
+    }
+    return p->crops()[0].growth();
+}
 
 // --- calendar -------------------------------------------------------------
 
@@ -86,12 +100,10 @@ static void testCalendar() {
     CHECK_EQ(kUsPerDay, 86400000000LL);
     CHECK_EQ(kUsPerYear, 31104000000000LL);
 
-    // Month boundary: 30 days is the whole of month 1, and 12 * 30 = 360 a year.
     const CalendarDate month = toCalendar(30 * kUsPerDay);
     CHECK_EQ(month.month, 2);
     CHECK_EQ(month.day, 1);
 
-    // Last instant of year 1.
     const std::int64_t last = kUsPerYear - 1;
     const CalendarDate end = toCalendar(last);
     CHECK_EQ(end.year, 1);
@@ -103,7 +115,6 @@ static void testCalendar() {
     CHECK_EQ(end.microsecond, 999999);
     CHECK_EQ(fromCalendar(end), last);
 
-    // First instant of year 2.
     const CalendarDate next = toCalendar(kUsPerYear);
     CHECK_EQ(next.year, 2);
     CHECK_EQ(next.month, 1);
@@ -111,18 +122,46 @@ static void testCalendar() {
     CHECK_EQ(next.hour, 0);
 }
 
+// --- seasons --------------------------------------------------------------
+
+static void testSeasons() {
+    CHECK(seasonAt(0) == Season::Spring);
+    CHECK(seasonAt(90 * kUsPerDay - 1) == Season::Spring);
+    CHECK(seasonAt(90 * kUsPerDay) == Season::Summer);
+    CHECK(seasonAt(180 * kUsPerDay) == Season::Autumn);
+    CHECK(seasonAt(270 * kUsPerDay) == Season::Winter);
+    CHECK(seasonAt(360 * kUsPerDay) == Season::Spring);  // the year wraps
+
+    CHECK_EQ(kUsPerSeason, 90 * kUsPerDay);
+    CHECK_EQ(usUntilNextSeason(0), kUsPerSeason);
+    CHECK_EQ(usUntilNextSeason(45 * kUsPerDay), 45 * kUsPerDay);
+    // Exactly on a boundary: a whole season is still ahead, not zero.
+    CHECK_EQ(usUntilNextSeason(90 * kUsPerDay), kUsPerSeason);
+
+    CHECK(seasonGrows(Season::Spring));
+    CHECK(seasonGrows(Season::Summer));
+    CHECK(seasonWithers(Season::Autumn));
+    CHECK(!seasonGrows(Season::Winter));
+    CHECK(!seasonWithers(Season::Winter));
+}
+
 // --- the evaluator owns time ----------------------------------------------
 
 static void testClock() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
-    const std::int64_t dt = 1000;  // 1 ms
+    const std::int64_t dt = 1000;
     for (int i = 0; i < 1000; ++i) {
         ev->makeStep(dt);
     }
     CHECK_EQ(ev->clock().now_us(), 1000 * dt);
 }
 
-// Signals land on a boundary, not in the middle of a step.
+static void testStartDayIsHonoured() {
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0, 0, 178);
+    CHECK_EQ(ev->clock().now_us(), 177 * kUsPerDay);
+    CHECK(seasonAt(ev->clock().now_us()) == Season::Summer);
+}
+
 static void testSignalsApplyOnBoundary() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     ev->pushSignal(ControlSignal{SignalKind::InterruptAcceleration, 0});
@@ -131,78 +170,143 @@ static void testSignalsApplyOnBoundary() {
     CHECK_EQ(ev->pendingSignals(), 0u);
 }
 
-// --- acceleration mode ----------------------------------------------------
-
 static void testAccelerationMode() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     CHECK(ev->mode() == Mode::Normal);
 
-    // The run is put into acceleration by a control signal, not by the caller
-    // flipping a flag.
     ev->pushSignal(ControlSignal{SignalKind::BeginAcceleration, 1000});
     ev->makeStep(400);
     CHECK(ev->mode() == Mode::Accelerating);
     CHECK_EQ(ev->accelerationRemaining_us(), 600);
 
-    // The span is exhausted: acceleration ends and a new turn begins (OD-14).
     ev->makeStep(600);
     CHECK(ev->mode() == Mode::Normal);
     CHECK_EQ(ev->accelerationRemaining_us(), 0);
     CHECK_EQ(ev->clock().now_us(), 1000);
 
-    // An interrupt ends it early, and also on a boundary.
     ev->pushSignal(ControlSignal{SignalKind::BeginAcceleration, 100000});
     ev->makeStep(10);
     CHECK(ev->mode() == Mode::Accelerating);
     ev->pushSignal(ControlSignal{SignalKind::InterruptAcceleration, 0});
-    CHECK(ev->mode() == Mode::Accelerating);  // not yet: the signal is pending
+    CHECK(ev->mode() == Mode::Accelerating);
     ev->makeStep(10);
     CHECK(ev->mode() == Mode::Normal);
-    CHECK_EQ(ev->accelerationRemaining_us(), 0);
 }
 
-// --- accumulation is independent of how the span is split ------------------
+// --- the accumulator, kept as a utility -----------------------------------
 
-static std::int64_t grownOver(std::int64_t rate, std::int64_t total_us, std::int64_t dt_us) {
-    std::unique_ptr<IEvaluator> ev = evaluatorWith(rate);
-    std::int64_t done = 0;
-    while (done < total_us) {
-        const std::int64_t step = std::min(dt_us, total_us - done);
-        ev->makeStep(step);
-        done += step;
-    }
-    const CropSystem* c = crops(*ev);
-    return c != nullptr ? c->grown() : -1;
-}
-
-static void testAccumulationExactness() {
+static void testAccumulatorExactness() {
+    // Crops no longer use it - they can shrink, and a signed sum handles that - but
+    // it stays in the library and stays tested: it is the tool for any rate that
+    // only goes up.
     const std::int64_t rate = 123457;  // micro-units per second
     const std::int64_t total = 7 * kUsPerDay;
     const std::int64_t expected = rate * total / 1000000;
 
-    CHECK_EQ(grownOver(rate, total, total), expected);
-    CHECK_EQ(grownOver(rate, total, total / 7), expected);
-    CHECK_EQ(grownOver(rate, total, total / 1000), expected);
-
-    // Finest possible split, but over a span small enough to actually run: one
-    // microsecond at a time for one second is a million steps, not six hundred
-    // billion. The invariance claim does not depend on the span's size.
-    const std::int64_t one_second = kUsPerSecond;
-    CHECK_EQ(grownOver(rate, one_second, 1), rate * one_second / 1000000);
-}
-
-// --- the headline test: the same span at any dt gives the same state -------
-
-static void testDtInvariance() {
-    const std::int64_t total = 3 * kUsPerDay;
-
-    auto run = [total](std::int64_t dt) {
-        std::unique_ptr<IEvaluator> ev = evaluatorWith(987654, 42);
+    auto grown = [rate, total](std::int64_t dt) {
+        Accumulator acc;
         std::int64_t done = 0;
         while (done < total) {
-            const std::int64_t step = std::min(dt, total - done);
-            ev->makeStep(step);
-            done += step;
+            const std::int64_t slice = std::min(dt, total - done);
+            acc.advance(rate, slice);
+            done += slice;
+        }
+        return acc.whole;
+    };
+
+    CHECK_EQ(grown(total), expected);
+    CHECK_EQ(grown(total / 7), expected);
+    CHECK_EQ(grown(total / 1000), expected);
+
+    const std::int64_t one_second = kUsPerSecond;
+    Accumulator acc;
+    for (std::int64_t i = 0; i < one_second; ++i) {
+        acc.advance(rate, 1);
+    }
+    CHECK_EQ(acc.whole, rate * one_second / 1000000);
+}
+
+// --- crops grow and wither by season --------------------------------------
+
+static void testCropsGrowInSpringAndSummer() {
+    std::unique_ptr<IEvaluator> spring = evaluatorWith(1, 0, 1);  // day 1
+    spring->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*spring), 86400);  // 1 unit per second for a day
+
+    std::unique_ptr<IEvaluator> summer = evaluatorWith(1, 0, 100);  // day 100
+    summer->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*summer), 86400);
+}
+
+static void testCropsAreDormantInWinter() {
+    std::unique_ptr<IEvaluator> winter = evaluatorWith(1, 0, 271);
+    winter->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*winter), 0);
+}
+
+static void testCropsWitherInAutumn() {
+    // Summer day grows, the next day is autumn and takes it back down.
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 180, 1, 1);
+    ev->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*ev), 86400);
+    ev->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*ev), 0);
+}
+
+static void testWitheringStopsAtZero() {
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 200, 1, 5);  // autumn, fast wither
+    ev->makeStep(kUsPerDay);
+    const PlantSystem* p = plants(*ev);
+    CHECK(p != nullptr);
+    if (p != nullptr && !p->crops().empty()) {
+        CHECK_EQ(p->crops()[0].growth_sum, 0);
+        CHECK_EQ(p->crops()[0].growth(), 0);
+    }
+}
+
+// --- the headline property: a season boundary does not depend on dt -------
+
+static void testSeasonBoundaryIsDtInvariant() {
+    // Four days from day 178: three of growth, then the boundary into autumn, then
+    // a day of withering. Every step size must reach the same world.
+    const std::int64_t total = 4 * kUsPerDay;
+
+    auto run = [total](std::int64_t dt) {
+        std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42, 178, 8, 600);
+        std::int64_t done = 0;
+        while (done < total) {
+            const std::int64_t slice = std::min(dt, total - done);
+            ev->makeStep(slice);
+            done += slice;
+        }
+        return ev->hash();
+    };
+
+    const std::uint64_t one_second = run(1000000);
+    CHECK_EQ(run(3600000000), one_second);   // hour steps: land exactly on the boundary
+    CHECK_EQ(run(25200000000), one_second);  // seven-hour steps: the boundary falls inside one
+    CHECK_EQ(run(total), one_second);        // one single four-day step
+
+    // And the amount itself: three days growing at 1000, one day withering at 600.
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42, 178, 8, 600);
+    for (int i = 0; i < 4; ++i) {
+        ev->makeStep(kUsPerDay);
+    }
+    CHECK_EQ(firstCropGrowth(*ev), 3 * 86400 * 1000 - 86400 * 600);
+}
+
+// --- general invariance and determinism -----------------------------------
+
+static void testDtInvariance() {
+    const std::int64_t total = 90 * kUsPerDay;  // a whole season
+
+    auto run = [total](std::int64_t dt) {
+        std::unique_ptr<IEvaluator> ev = evaluatorWith(987, 42, 1, 2);
+        std::int64_t done = 0;
+        while (done < total) {
+            const std::int64_t slice = std::min(dt, total - done);
+            ev->makeStep(slice);
+            done += slice;
         }
         return ev->hash();
     };
@@ -210,13 +314,12 @@ static void testDtInvariance() {
     const std::uint64_t once = run(total);
     CHECK_EQ(run(total / 2), once);
     CHECK_EQ(run(total / 96), once);
-    CHECK_EQ(run(total / 86400), once);
-    CHECK_EQ(run(1000000), once);  // one second at a time
+    CHECK_EQ(run(1000000), once);
 }
 
 static void testDeterminism() {
-    std::unique_ptr<IEvaluator> a = evaluatorWith(500, 7);
-    std::unique_ptr<IEvaluator> b = evaluatorWith(500, 7);
+    std::unique_ptr<IEvaluator> a = evaluatorWith(500, 7, 1, 4);
+    std::unique_ptr<IEvaluator> b = evaluatorWith(500, 7, 1, 4);
     for (int i = 0; i < 1000; ++i) {
         a->makeStep(333);
         b->makeStep(333);
@@ -224,42 +327,32 @@ static void testDeterminism() {
     CHECK_EQ(a->hash(), b->hash());
 }
 
-// --- the hash must actually cover the state -------------------------------
-
 static void testHashSensitivity() {
     CHECK_EQ(evaluatorWith(0, 0)->hash(), evaluatorWith(0, 0)->hash());
 
-    // The clock is covered.
     std::unique_ptr<IEvaluator> timed = evaluatorWith(0, 0);
-    timed->makeStep(1);
+    timed->makeStep(kUsPerDay);
     CHECK(evaluatorWith(0, 0)->hash() != timed->hash());
 
-    // The whole part of growth is covered: same clock, same carry, different
-    // whole.
-    std::unique_ptr<IEvaluator> grown = evaluatorWith(1000000, 0);
-    grown->makeStep(1000000);  // one whole unit
+    // Growth is covered.
+    std::unique_ptr<IEvaluator> grown = evaluatorWith(1, 0);
+    grown->makeStep(kUsPerDay);
     std::unique_ptr<IEvaluator> still = evaluatorWith(0, 0);
-    still->makeStep(1000000);  // no growth at all
+    still->makeStep(kUsPerDay);
     CHECK(grown->hash() != still->hash());
 
-    // The carry is covered on its own: same clock, same whole (zero), different
-    // fraction.
-    std::unique_ptr<IEvaluator> carry_one = evaluatorWith(1, 0);
-    carry_one->makeStep(1);
-    std::unique_ptr<IEvaluator> carry_two = evaluatorWith(2, 0);
-    carry_two->makeStep(1);
-    CHECK(carry_one->hash() != carry_two->hash());
+    // So is the number of crops, i.e. the container is covered.
+    CHECK(evaluatorWith(0, 0, 1, 2)->hash() != evaluatorWith(0, 0, 1, 3)->hash());
 
-    // The world RNG is covered.
+    // And the world RNG.
     CHECK(evaluatorWith(0, 1)->hash() != evaluatorWith(0, 2)->hash());
 }
 
 // --- settings live outside the simulation ---------------------------------
 //
-// There is no longer a test asserting that a setting cannot reach the world,
-// because the compiler now guarantees it: Settings lives in the config library,
-// which core does not depend on. A file in core cannot name the type. That is a
-// stronger guarantee than a test, and it cannot rot.
+// No test asserts that a setting cannot reach the world, because the compiler
+// guarantees it: Settings lives in the config library, which core does not depend
+// on. A file in core cannot name the type.
 
 static void testSettingsRoundTrip() {
     config::Settings original;
@@ -282,11 +375,10 @@ static void testSettingsRoundTrip() {
 
 static void testSettingsMissingFileIsDefaults() {
     config::Settings loaded;
-    loaded.brightness = 7;  // prove it is overwritten only if the file exists
+    loaded.brightness = 7;
     std::string error;
-    // A missing file is "no preferences saved yet", not a failure.
     CHECK(config::loadSettings("tmp_does_not_exist_settings.ini", loaded, error));
-    CHECK_EQ(loaded.brightness, 7);  // untouched
+    CHECK_EQ(loaded.brightness, 7);
     config::Settings defaults;
     CHECK_EQ(defaults.brightness, 100);
     CHECK_EQ(defaults.master_volume, 80);
@@ -323,7 +415,11 @@ static void testScenarioLoading() {
     if (!ok) {
         return;
     }
-    CHECK_EQ(sc.steps, 86400);
+    CHECK_EQ(sc.start_day, 178);
+    CHECK_EQ(sc.crop_count, 8);
+    CHECK_EQ(sc.crop_rate, 1000);
+    CHECK_EQ(sc.wither_rate, 600);
+    CHECK_EQ(sc.steps, 345600);
     CHECK_EQ(sc.dt_us, 1000000);
     CHECK(sc.seed == 1);
 }
@@ -341,8 +437,7 @@ static void testScenarioRejectsUnknownKey() {
     }
     Scenario sc;
     std::string error;
-    const bool ok = loadScenario(path, sc, error);
-    CHECK(!ok);
+    CHECK(!loadScenario(path, sc, error));
     std::remove(path.c_str());
 }
 
@@ -365,7 +460,23 @@ static void testScenarioToleratesBom() {
     }
     CHECK(ok);
     CHECK_EQ(sc.steps, 2);
-    CHECK_EQ(sc.dt_us, 5);
+    std::remove(path.c_str());
+}
+
+static void testScenarioRejectsBadStartDay() {
+    const std::string path = "tmp_bad_day.scn";
+    {
+        std::FILE* f = std::fopen(path.c_str(), "wb");
+        if (f == nullptr) {
+            CHECK(false);
+            return;
+        }
+        std::fputs("[state]\nstart_day = 0\n[run]\nsteps = 1\ndt_us = 1\n", f);
+        std::fclose(f);
+    }
+    Scenario sc;
+    std::string error;
+    CHECK(!loadScenario(path, sc, error));
     std::remove(path.c_str());
 }
 
@@ -380,12 +491,35 @@ static void testRngIsReproducible() {
     CHECK(c.next() != d.next());
 }
 
+// --- the generating mechanism --------------------------------------------
+
+static void testBuildEvaluator() {
+    Scenario sc;
+    sc.seed = 99;
+    sc.start_day = 5;
+    sc.crop_count = 3;
+    sc.crop_rate = 250;
+    std::unique_ptr<IEvaluator> ev = buildEvaluator(sc);
+
+    CHECK_EQ(ev->world().systems().size(), 1u);
+    CHECK(plants(*ev) != nullptr);
+    if (plants(*ev) != nullptr) {
+        CHECK_EQ(plants(*ev)->crops().size(), 3u);
+        CHECK_EQ(plants(*ev)->growthRate(), 250);
+        CHECK_EQ(plants(*ev)->crops()[0].x, 0);
+        CHECK_EQ(plants(*ev)->crops()[2].x, 2);
+    }
+    CHECK_EQ(ev->clock().now_us(), 4 * kUsPerDay);
+    CHECK(ev->mode() == Mode::Normal);
+
+    CHECK_EQ(buildEvaluator(sc)->hash(), ev->hash());
+    sc.seed = 100;
+    CHECK(buildEvaluator(sc)->hash() != ev->hash());
+}
+
 // --- pacing: the step rate is the simulation's, not the display's ---------
 
 static void testPacingIgnoresChunking() {
-    // One minute of real time, at dt = 20 ms, delivered in three different chunk
-    // patterns. The total number of steps must be identical: it depends on elapsed
-    // time and dt, not on how often the caller woke up.
     const std::int64_t dt = 20000;
     const std::int64_t total = 60 * 1000000;
 
@@ -402,25 +536,22 @@ static void testPacingIgnoresChunking() {
         return steps;
     };
 
-    const std::int64_t even = run(dt);              // exactly one step per wake-up
+    const std::int64_t even = run(dt);
     CHECK_EQ(even, total / dt);
-    CHECK_EQ(run(6944), even);                      // ~144 Hz wake-ups
-    CHECK_EQ(run(16667), even);                     // ~60 Hz wake-ups
-    CHECK_EQ(run(1000), even);                      // 1000 Hz wake-ups
-    CHECK_EQ(run(total), even);                     // one single wake-up
+    CHECK_EQ(run(6944), even);
+    CHECK_EQ(run(16667), even);
+    CHECK_EQ(run(1000), even);
+    CHECK_EQ(run(total), even);
 }
 
 static void testPacingKeepsRemainder() {
     runtime::Scheduler scheduler(20000);
-    // Wake up 144 times for one second's worth of real time.
     for (int i = 0; i < 144; ++i) {
         scheduler.addElapsed(6944);
     }
-    const std::int64_t steps = scheduler.takeDueSteps(1000);
-    CHECK_EQ(steps, 49);              // 999 936 us / 20 000 = 49 whole steps
-    CHECK_EQ(scheduler.pending_us(), 19936);  // nothing lost
+    CHECK_EQ(scheduler.takeDueSteps(1000), 49);
+    CHECK_EQ(scheduler.pending_us(), 19936);
 
-    // One more wake-up completes the fiftieth step.
     scheduler.addElapsed(6944);
     CHECK_EQ(scheduler.takeDueSteps(1000), 1);
     CHECK_EQ(scheduler.pending_us(), 6880);
@@ -428,18 +559,13 @@ static void testPacingKeepsRemainder() {
 
 static void testPacingCapsLongStall() {
     runtime::Scheduler scheduler(20000);
-    scheduler.addElapsed(10 * 1000000);  // ten seconds of stall
-    const std::int64_t steps = scheduler.takeDueSteps(3);
-    CHECK_EQ(steps, 3);
-    // The rest is dropped, not queued: the game falls behind real time rather than
-    // spending longer catching up than it stalled.
+    scheduler.addElapsed(10 * 1000000);
+    CHECK_EQ(scheduler.takeDueSteps(3), 3);
     CHECK_EQ(scheduler.pending_us(), 0);
 }
 
 // --- the timer: late binding, pacing, and acceleration --------------------
 
-// Synthetic time instead of sleeps. What we want to assert is arithmetic, not the
-// scheduler of the operating system.
 class FakeTimeSource final : public runtime::TimeSource {
 public:
     std::int64_t now_us() const override { return m_now_us; }
@@ -461,15 +587,14 @@ static void testTimerNeedsAttaching() {
     FakeTimeSource time;
     runtime::Timer timer(runtime::Scheduler(20000), time);
 
-    time.advance(100000);  // five steps' worth of real time went by
-    CHECK_EQ(timer.poll(100), 0);  // nobody to step yet
+    time.advance(100000);
+    CHECK_EQ(timer.poll(100), 0);
     CHECK(!timer.attached());
 
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     timer.attach(ev.get());
     CHECK(timer.attached());
 
-    // Time that passed before attaching is not owed to the evaluator.
     CHECK_EQ(timer.poll(100), 0);
     CHECK_EQ(ev->clock().now_us(), 0);
 }
@@ -485,7 +610,7 @@ static void testTimerRunsDueSteps() {
     CHECK_EQ(ev->clock().now_us(), 20000);
     CHECK_EQ(ev->stepsTaken(), 1);
 
-    time.advance(30000);  // one and a half steps
+    time.advance(30000);
     CHECK_EQ(timer.poll(100), 1);
     CHECK_EQ(ev->clock().now_us(), 40000);
     CHECK_EQ(timer.scheduler().pending_us(), 10000);
@@ -497,12 +622,12 @@ static void testTimerWaitsForTheNextStep() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     timer.attach(ev.get());
 
-    timer.waitForNextStep();  // nothing has elapsed yet: sleeps the whole step
+    timer.waitForNextStep();
     CHECK_EQ(time.slept_us(), 20000);
 
     time.advance(5000);
-    timer.poll(100);          // not enough for a step; 5000 us sits in the remainder
-    timer.waitForNextStep();  // so only 15000 more is needed
+    timer.poll(100);
+    timer.waitForNextStep();
     CHECK_EQ(time.slept_us(), 35000);
 }
 
@@ -517,40 +642,16 @@ static void testTimerDoesNotPaceAcceleration() {
     CHECK_EQ(timer.poll(100), 1);
     CHECK(ev->mode() == Mode::Accelerating);
 
-    // Acceleration is not paced by real time: the timer must not sleep.
     const std::int64_t before = time.slept_us();
     timer.waitForNextStep();
     CHECK_EQ(time.slept_us(), before);
 }
 
-// --- the generating mechanism --------------------------------------------
-
-static void testBuildEvaluator() {
-    Scenario sc;
-    sc.seed = 99;
-    sc.crop_rate = 250;
-    std::unique_ptr<IEvaluator> ev = buildEvaluator(sc);
-
-    CHECK_EQ(ev->world().systems().size(), 1u);
-    CHECK(crops(*ev) != nullptr);
-    if (crops(*ev) != nullptr) {
-        CHECK_EQ(crops(*ev)->grown(), 0);
-    }
-    CHECK_EQ(ev->clock().now_us(), 0);
-    CHECK(ev->mode() == Mode::Normal);
-
-    // The seed reaches the world RNG, which is what makes two runs of the same
-    // scenario identical and two different seeds differ.
-    CHECK_EQ(buildEvaluator(sc)->hash(), ev->hash());
-    sc.seed = 100;
-    CHECK(buildEvaluator(sc)->hash() != ev->hash());
-}
-
 // --- timing ---------------------------------------------------------------
 //
 // Wall-clock numbers are reported, never asserted. A test that fails when the
-// machine is busy teaches people to ignore failures; a table that is printed on
-// every run shows a regression the moment it appears.
+// machine is busy teaches people to ignore failures; a table printed on every run
+// shows a regression the moment it appears.
 
 static std::int64_t now_us() {
     using Clock = std::chrono::steady_clock;
@@ -571,10 +672,17 @@ struct TestEntry {
 
 static const TestEntry kTests[] = {
     {"calendar", testCalendar},
+    {"seasons", testSeasons},
     {"clock", testClock},
+    {"start day honoured", testStartDayIsHonoured},
     {"signals apply on boundary", testSignalsApplyOnBoundary},
     {"acceleration mode", testAccelerationMode},
-    {"accumulation exactness", testAccumulationExactness},
+    {"accumulator exactness", testAccumulatorExactness},
+    {"crops grow", testCropsGrowInSpringAndSummer},
+    {"crops dormant in winter", testCropsAreDormantInWinter},
+    {"crops wither", testCropsWitherInAutumn},
+    {"wither stops at zero", testWitheringStopsAtZero},
+    {"season boundary invariant", testSeasonBoundaryIsDtInvariant},
     {"dt invariance", testDtInvariance},
     {"determinism", testDeterminism},
     {"hash sensitivity", testHashSensitivity},
@@ -584,6 +692,7 @@ static const TestEntry kTests[] = {
     {"scenario loading", testScenarioLoading},
     {"scenario unknown key", testScenarioRejectsUnknownKey},
     {"scenario BOM", testScenarioToleratesBom},
+    {"scenario bad start day", testScenarioRejectsBadStartDay},
     {"rng reproducible", testRngIsReproducible},
     {"build evaluator", testBuildEvaluator},
     {"pacing ignores chunking", testPacingIgnoresChunking},
@@ -596,20 +705,18 @@ static const TestEntry kTests[] = {
 };
 
 // Throughput of the simulation itself, and what it means for the acceleration
-// targets. OD-33 asks whether a skip can fit a watchable real time; this is the
-// number that answers it, on this machine, today.
+// targets from OD-33.
 static void runBenchmark(std::int64_t steps) {
-    const std::int64_t dt_us = 20000;  // 50 Hz, a rate that divides a second exactly
+    const std::int64_t dt_us = 20000;
 
-    // Warm-up: the first pass pays for page faults and cold caches.
     {
-        std::unique_ptr<IEvaluator> warm = evaluatorWith(1000, 42);
+        std::unique_ptr<IEvaluator> warm = evaluatorWith(1000, 42, 1, 8);
         for (std::int64_t i = 0; i < steps / 10 + 1; ++i) {
             warm->makeStep(dt_us);
         }
     }
 
-    std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42);
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42, 1, 8);
     const std::int64_t start = now_us();
     for (std::int64_t i = 0; i < steps; ++i) {
         ev->makeStep(dt_us);
@@ -620,14 +727,12 @@ static void runBenchmark(std::int64_t steps) {
     const double per_second = static_cast<double>(steps) / seconds;
 
     std::printf("\nthroughput\n");
-    std::printf("  %lld steps at dt %lld us, 1 system\n", static_cast<long long>(steps),
+    std::printf("  %lld steps at dt %lld us, 8 crops\n", static_cast<long long>(steps),
                 static_cast<long long>(dt_us));
     std::printf("  wall     %.3f s\n", seconds);
     std::printf("  rate     %.0f steps/s\n", per_second);
     std::printf("  cost     %.4f us/step\n", seconds * 1e6 / static_cast<double>(steps));
 
-    // Hashing is not paid every step, but a test harness pays it constantly and a
-    // runner pays it at the end, so its cost is worth knowing separately.
     const int hash_calls = 1000000;
     std::uint64_t sink = 0;
     const std::int64_t h0 = now_us();
@@ -674,8 +779,6 @@ int main(int argc, char** argv) {
     }
     const std::int64_t all_us = now_us() - all_start;
 
-    // Slowest first: the top of this table is where to look when the suite starts
-    // dragging.
     std::vector<Timing> sorted = timings;
     std::sort(sorted.begin(), sorted.end(),
               [](const Timing& a, const Timing& b) { return a.us > b.us; });
