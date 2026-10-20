@@ -1,20 +1,33 @@
 # The same four days as skeleton.scn, computed with one-hour steps.
 #
-# Identical expected hash on purpose: acceleration must not change what the world
-# becomes, only how coarsely it is sampled on the way there.
+# Identical expected hash on purpose: growth is a function of the instant, not an
+# accumulated total, so the step size must not matter at all.
 
 [scenario]
 seed = 1
 
 [state]
-start_day = 178
+start_day = 100
 crops = 8
 crop_rate = 1000
-wither_rate = 600
 
 [run]
 steps = 96
 dt_us = 3600000000
 
 [expect]
-hash = 3842446313089821568
+hash = 7664395767353456814
+
+[growth]
+m1 = 0
+m2 = 0
+m3 = 40
+m4 = 80
+m5 = 100
+m6 = 100
+m7 = 100
+m8 = 100
+m9 = -50
+m10 = -100
+m11 = -100
+m12 = 0

@@ -10,16 +10,21 @@ namespace core {
 // It is not declared in a header on purpose. A world exists inside the evaluator
 // that owns it and nowhere else, so it cannot be created by one caller and then
 // dropped by another; the only way to have one is to have an evaluator.
-static World buildWorld(const Scenario& scenario) {
+static World buildWorld(const Scenario& scenario, std::int64_t start_us) {
     World world;
+
+    MonthProfile profile;
+    for (int month = 1; month <= kMonthsPerYear; ++month) {
+        profile.setMonth(month, scenario.coefficient[month - 1]);
+    }
 
     // The order of addSystem calls is the order systems run in, and it is stated
     // once, here.
-    PlantSystem* plants = new PlantSystem(scenario.crop_rate, scenario.wither_rate);
+    PlantSystem* plants = new PlantSystem(scenario.crop_rate, profile);
     for (std::int64_t i = 0; i < scenario.crop_count; ++i) {
         // A placeholder layout until the map exists: fertile cells will decide
         // where a crop is sown.
-        plants->sow(static_cast<std::int32_t>(i % 8), static_cast<std::int32_t>(i / 8));
+        plants->sow(static_cast<std::int32_t>(i % 8), static_cast<std::int32_t>(i / 8), start_us);
     }
     world.addSystem(std::unique_ptr<System>(plants));
 
@@ -28,7 +33,8 @@ static World buildWorld(const Scenario& scenario) {
 }
 
 Evaluator::Evaluator(const Scenario& scenario)
-    : m_clock((scenario.start_day - 1) * kUsPerDay), m_world(buildWorld(scenario)) {}
+    : m_clock((scenario.start_day - 1) * kUsPerDay),
+      m_world(buildWorld(scenario, (scenario.start_day - 1) * kUsPerDay)) {}
 
 void Evaluator::pushSignal(const ControlSignal& signal) {
     m_pending.push_back(signal);
@@ -42,8 +48,6 @@ void Evaluator::applyPendingSignals() {
             m_acceleration_remaining_us = signal.span_us;
             break;
         case SignalKind::InterruptAcceleration:
-            // An interrupt ends acceleration and starts a new turn just as
-            // completing the span does (OD-14).
             m_mode = Mode::Normal;
             m_acceleration_remaining_us = 0;
             break;

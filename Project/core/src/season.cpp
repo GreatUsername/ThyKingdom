@@ -2,24 +2,17 @@
 
 namespace core {
 
-Season seasonAt(std::int64_t us) {
-    // Time starts at zero, so the index is never negative and a plain modulo is
-    // enough. The cast keeps the arithmetic in the calendar's own units.
-    const std::int64_t index = (us / kUsPerSeason) % kSeasonsPerYear;
-    switch (index) {
-    case 0:
+Season seasonOfMonth(int month) {
+    if (month >= 3 && month <= 5) {
         return Season::Spring;
-    case 1:
-        return Season::Summer;
-    case 2:
-        return Season::Autumn;
-    default:
-        return Season::Winter;
     }
-}
-
-std::int64_t usUntilNextSeason(std::int64_t us) {
-    return kUsPerSeason - (us % kUsPerSeason);
+    if (month >= 6 && month <= 8) {
+        return Season::Summer;
+    }
+    if (month >= 9 && month <= 11) {
+        return Season::Autumn;
+    }
+    return Season::Winter;
 }
 
 }  // namespace core

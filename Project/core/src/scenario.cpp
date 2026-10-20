@@ -31,6 +31,23 @@ bool parseI64(const std::string& s, std::int64_t& out) {
     return true;
 }
 
+// "growth.m7" -> 7, otherwise 0.
+int growthMonth(const std::string& key) {
+    const std::string prefix = "growth.m";
+    if (key.size() <= prefix.size() || key.compare(0, prefix.size(), prefix) != 0) {
+        return 0;
+    }
+    const std::string rest = key.substr(prefix.size());
+    if (rest.size() != 1 && rest.size() != 2) {
+        return 0;
+    }
+    std::int64_t month = 0;
+    if (!parseI64(rest, month)) {
+        return 0;
+    }
+    return (month >= 1 && month <= kMonthsPerYear) ? static_cast<int>(month) : 0;
+}
+
 }  // namespace
 
 bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
@@ -56,8 +73,6 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
             out.crop_count = iv;
         } else if (full == "state.crop_rate") {
             out.crop_rate = iv;
-        } else if (full == "state.wither_rate") {
-            out.wither_rate = iv;
         } else if (full == "run.steps") {
             out.steps = iv;
         } else if (full == "run.dt_us") {
@@ -65,8 +80,12 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
         } else if (full == "expect.hash") {
             out.expect_hash = static_cast<std::uint64_t>(iv);
         } else {
-            error = "line " + std::to_string(e.line) + ": unknown key '" + full + "'";
-            return false;
+            const int month = growthMonth(full);
+            if (month == 0) {
+                error = "line " + std::to_string(e.line) + ": unknown key '" + full + "'";
+                return false;
+            }
+            out.coefficient[month - 1] = iv;
         }
     }
 

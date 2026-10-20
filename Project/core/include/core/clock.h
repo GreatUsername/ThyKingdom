@@ -24,11 +24,10 @@ private:
     std::int64_t m_now_us = 0;
 };
 
-// Calendar conversion lives beside the clock because it is the same quantity
-// seen differently: 12 months of 30 days, 24 hours a day, 360 days a year
-// (OD-31). Exact integer arithmetic, no month-length table, no leap years. If
-// real month lengths are ever wanted, the month table becomes data; the clock
-// stays integer.
+// Calendar conversion lives beside the clock because it is the same quantity seen
+// differently: 12 months of 30 days, 24 hours a day, 360 days a year (OD-31).
+// Exact integer arithmetic, no month-length table, no leap years. If real month
+// lengths are ever wanted, the month table becomes data; the clock stays integer.
 constexpr std::int64_t kUsPerSecond = 1'000'000;
 constexpr std::int64_t kUsPerMinute = 60 * kUsPerSecond;
 constexpr std::int64_t kUsPerHour = 60 * kUsPerMinute;
@@ -36,9 +35,21 @@ constexpr std::int64_t kUsPerDay = 24 * kUsPerHour;
 constexpr std::int64_t kUsPerMonth = 30 * kUsPerDay;
 constexpr std::int64_t kUsPerYear = 12 * kUsPerMonth;
 
+constexpr std::int64_t kSecondsPerDay = 86'400;
+constexpr std::int64_t kSecondsPerMonth = 30 * kSecondsPerDay;
+constexpr std::int64_t kSecondsPerYear = 12 * kSecondsPerMonth;
+
 constexpr int kMonthsPerYear = 12;
 constexpr int kDaysPerMonth = 30;
 constexpr int kDaysPerYear = kDaysPerMonth * kMonthsPerYear;
+
+// Month 1..12 of the year the instant falls in.
+inline int monthOf(std::int64_t us) {
+    return static_cast<int>((us % kUsPerYear) / kUsPerMonth) + 1;
+}
+
+// Offset into the month the instant falls in.
+inline std::int64_t monthOffset(std::int64_t us) { return us % kUsPerMonth; }
 
 struct CalendarDate {
     std::int64_t year = 1;

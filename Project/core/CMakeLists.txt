@@ -4,6 +4,7 @@
 set(HEADERS
   include/core/clock.h
   include/core/season.h
+  include/core/month_profile.h
   include/core/accumulator.h
   include/core/ini.h
   include/core/control_signal.h
@@ -20,6 +21,7 @@ add_library(core STATIC
   src/ini.cpp
   src/scenario.cpp
   src/season.cpp
+  src/month_profile.cpp
   src/world.cpp
   src/evaluator.cpp
   src/plants.cpp

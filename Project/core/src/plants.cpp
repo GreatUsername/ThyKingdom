@@ -2,59 +2,35 @@
 
 namespace core {
 
-PlantSystem::PlantSystem(std::int64_t growth_rate, std::int64_t wither_rate)
-    : m_growth_rate(growth_rate), m_wither_rate(wither_rate) {}
+PlantSystem::PlantSystem(std::int64_t base_rate, MonthProfile profile)
+    : m_base_rate(base_rate), m_profile(profile) {}
 
-void PlantSystem::sow(std::int32_t x, std::int32_t y) {
+void PlantSystem::sow(std::int32_t x, std::int32_t y, std::int64_t now_us) {
     Crop crop;
     crop.x = x;
     crop.y = y;
+    crop.sowed_integral = m_profile.cumulative(now_us);
+    crop.growth = 0;
     m_crops.push_back(crop);
 }
 
-void PlantSystem::step(Clock& clock, std::int64_t dt_us) {
-    if (dt_us <= 0 || m_crops.empty()) {
-        return;
+std::int64_t PlantSystem::growthAt(std::int64_t sowed_integral, std::int64_t now_us) const {
+    // Coefficient-seconds since sowing, scaled by the base rate and by the
+    // hundredths of the coefficient.
+    const std::int64_t span = m_profile.cumulative(now_us) - sowed_integral;
+    std::int64_t grown = m_base_rate * span / 100;
+    if (grown < 0) {
+        grown = 0;
     }
-
-    // The clock has already advanced, so this step covers [end - dt, end). Walking
-    // that interval in season-sized slices is what keeps a step from straddling a
-    // boundary: growth is applied with the rate of the season it actually happened
-    // in, whichever way the caller chose to cut time.
-    std::int64_t cursor = clock.now_us() - dt_us;
-    std::int64_t remaining = dt_us;
-    while (remaining > 0) {
-        const Season season = seasonAt(cursor);
-        const std::int64_t until_boundary = usUntilNextSeason(cursor);
-        const std::int64_t slice = remaining < until_boundary ? remaining : until_boundary;
-        applySeason(season, slice);
-        cursor += slice;
-        remaining -= slice;
-    }
+    return grown;
 }
 
-void PlantSystem::applySeason(Season season, std::int64_t slice_us) {
-    if (seasonGrows(season)) {
-        for (Crop& crop : m_crops) {
-            crop.growth_sum += m_growth_rate * slice_us;
-        }
-        return;
+void PlantSystem::step(Clock& clock, std::int64_t dt_us) {
+    (void)dt_us;
+    const std::int64_t now = clock.now_us();
+    for (Crop& crop : m_crops) {
+        crop.growth = growthAt(crop.sowed_integral, now);
     }
-
-    if (seasonWithers(season)) {
-        for (Crop& crop : m_crops) {
-            crop.growth_sum -= m_wither_rate * slice_us;
-            // Withering stops at zero. Clamping needs no boundary split: a coarse
-            // step that overshoots the ground and a fine one that lands exactly on
-            // it both leave the crop at zero, so the state agrees either way.
-            if (crop.growth_sum < 0) {
-                crop.growth_sum = 0;
-            }
-        }
-        return;
-    }
-
-    // Winter: dormant. Nothing grows and nothing dies.
 }
 
 void PlantSystem::hash(Hash64& h) const {
@@ -62,7 +38,7 @@ void PlantSystem::hash(Hash64& h) const {
     for (const Crop& crop : m_crops) {
         h.mixI64(static_cast<std::int64_t>(crop.x));
         h.mixI64(static_cast<std::int64_t>(crop.y));
-        h.mixI64(crop.growth_sum);
+        h.mixI64(crop.growth);
     }
 }
 

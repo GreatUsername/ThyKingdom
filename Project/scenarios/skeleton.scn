@@ -1,22 +1,34 @@
-# Four days ending at the summer-to-autumn boundary: three days of growth, then
-# one day of withering.
+# Four days from day 100, so the growth coefficient changes under the run: April is
+# 0.8, May 1.0, and the interpolation between them is what the crop follows.
 #
-# The step is one second, so the boundary at day 181 falls in the middle of a step.
-# That is the point: the system splits the step there, and the same span computed
-# with hour-long steps must produce the same hash.
+# The step is one second, so month and step edges do not line up. The same span with
+# hour-long steps must produce the same hash.
 
 [scenario]
 seed = 1
 
 [state]
-start_day = 178
+start_day = 100
 crops = 8
 crop_rate = 1000
-wither_rate = 600
 
 [run]
 steps = 345600
 dt_us = 1000000
 
 [expect]
-hash = 3842446313089821568
+hash = 7664395767353456814
+
+[growth]
+m1 = 0
+m2 = 0
+m3 = 40
+m4 = 80
+m5 = 100
+m6 = 100
+m7 = 100
+m8 = 100
+m9 = -50
+m10 = -100
+m11 = -100
+m12 = 0

@@ -1,9 +1,10 @@
-// Seasons, derived from the calendar.
+// Seasons, as a label for the month that is passing.
 //
-// Four seasons of 90 days each: spring covers days 1-90, summer 91-180, autumn
-// 181-270, winter 271-360. Four equal seasons are one of the reasons the calendar
-// has 360 days (OD-31): every boundary is exact integer arithmetic, so a step can
-// be split exactly on it instead of straddling it.
+// A season is not a block of days and it does not drive growth on its own: growth
+// comes from the month coefficient curve in MonthProfile, which changes smoothly
+// from month to month. Seasons remain useful as a human label - for a UI, for a
+// test, for talking about the year - so they are derived from the month here and
+// nowhere else.
 #pragma once
 
 #include <cstdint>
@@ -13,24 +14,16 @@
 namespace core {
 
 enum class Season {
+    Winter,
     Spring,
     Summer,
     Autumn,
-    Winter,
 };
 
-constexpr std::int64_t kDaysPerSeason = 90;
-constexpr std::int64_t kSeasonsPerYear = 4;
-constexpr std::int64_t kUsPerSeason = kDaysPerSeason * kUsPerDay;
+// Meteorological seasons by month: spring 3-5, summer 6-8, autumn 9-11, winter
+// 12, 1 and 2.
+Season seasonOfMonth(int month);
 
-Season seasonAt(std::int64_t us);
-
-// Game time until the next season boundary. Always in (0, kUsPerSeason].
-std::int64_t usUntilNextSeason(std::int64_t us);
-
-// What the season does to plants. Spring and summer grow them; autumn takes them
-// back down; winter leaves them alone.
-inline bool seasonGrows(Season s) { return s == Season::Spring || s == Season::Summer; }
-inline bool seasonWithers(Season s) { return s == Season::Autumn; }
+inline Season seasonAt(std::int64_t us) { return seasonOfMonth(monthOf(us)); }
 
 }  // namespace core

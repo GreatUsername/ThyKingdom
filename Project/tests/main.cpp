@@ -21,6 +21,7 @@
 #include "core/plants.h"
 #include "core/rng.h"
 #include "core/scenario.h"
+#include "core/month_profile.h"
 #include "core/season.h"
 #include "core/world.h"
 #include "runtime/scheduler.h"
@@ -59,17 +60,29 @@ static void report(bool ok, const char* file, int line, const char* what,
     } while (false)
 
 // A run with a set number of crops and a chosen start day.
+// A profile with the same coefficient in every month: growth is then just
+// base_rate times elapsed seconds, which keeps test expectations readable.
+static MonthProfile flatProfile(std::int64_t coefficient) {
+    MonthProfile profile;
+    for (int month = 1; month <= kMonthsPerYear; ++month) {
+        profile.setMonth(month, coefficient);
+    }
+    return profile;
+}
+
 static std::unique_ptr<IEvaluator> evaluatorWith(std::int64_t crop_rate,
                                                  std::uint64_t seed = 0,
                                                  std::int64_t start_day = 1,
                                                  std::int64_t crop_count = 1,
-                                                 std::int64_t wither_rate = 0) {
+                                                 const MonthProfile& profile = flatProfile(100)) {
     Scenario sc;
     sc.seed = seed;
     sc.start_day = start_day;
     sc.crop_count = crop_count;
     sc.crop_rate = crop_rate;
-    sc.wither_rate = wither_rate;
+    for (int month = 0; month < kMonthsPerYear; ++month) {
+        sc.coefficient[month] = profile.coefficient(month + 1);
+    }
     return buildEvaluator(sc);
 }
 
@@ -90,7 +103,7 @@ static std::int64_t firstCropGrowth(const IEvaluator& ev) {
     if (p == nullptr || p->crops().empty()) {
         return -1;
     }
-    return p->crops()[0].growth();
+    return p->crops()[0].growth;
 }
 
 // --- calendar -------------------------------------------------------------
@@ -125,24 +138,40 @@ static void testCalendar() {
 // --- seasons --------------------------------------------------------------
 
 static void testSeasons() {
-    CHECK(seasonAt(0) == Season::Spring);
-    CHECK(seasonAt(90 * kUsPerDay - 1) == Season::Spring);
-    CHECK(seasonAt(90 * kUsPerDay) == Season::Summer);
-    CHECK(seasonAt(180 * kUsPerDay) == Season::Autumn);
-    CHECK(seasonAt(270 * kUsPerDay) == Season::Winter);
-    CHECK(seasonAt(360 * kUsPerDay) == Season::Spring);  // the year wraps
+    // Seasons are a label for the month that is passing, not a block of days.
+    CHECK(seasonOfMonth(1) == Season::Winter);
+    CHECK(seasonOfMonth(2) == Season::Winter);
+    CHECK(seasonOfMonth(3) == Season::Spring);
+    CHECK(seasonOfMonth(5) == Season::Spring);
+    CHECK(seasonOfMonth(6) == Season::Summer);
+    CHECK(seasonOfMonth(8) == Season::Summer);
+    CHECK(seasonOfMonth(9) == Season::Autumn);
+    CHECK(seasonOfMonth(11) == Season::Autumn);
+    CHECK(seasonOfMonth(12) == Season::Winter);
 
-    CHECK_EQ(kUsPerSeason, 90 * kUsPerDay);
-    CHECK_EQ(usUntilNextSeason(0), kUsPerSeason);
-    CHECK_EQ(usUntilNextSeason(45 * kUsPerDay), 45 * kUsPerDay);
-    // Exactly on a boundary: a whole season is still ahead, not zero.
-    CHECK_EQ(usUntilNextSeason(90 * kUsPerDay), kUsPerSeason);
+    CHECK_EQ(monthOf(0), 1);
+    CHECK_EQ(monthOf(kUsPerMonth), 2);
+    CHECK_EQ(monthOf(11 * kUsPerMonth), 12);
+    CHECK_EQ(monthOf(kUsPerYear), 1);  // the next year's January
+    CHECK(seasonAt(2 * kUsPerMonth) == Season::Spring);
+}
 
-    CHECK(seasonGrows(Season::Spring));
-    CHECK(seasonGrows(Season::Summer));
-    CHECK(seasonWithers(Season::Autumn));
-    CHECK(!seasonGrows(Season::Winter));
-    CHECK(!seasonWithers(Season::Winter));
+static void testMonthProfileInterpolates() {
+    MonthProfile profile;
+    profile.setMonth(3, 40);
+    profile.setMonth(4, 80);
+
+    // Knots are exact at month starts.
+    CHECK_EQ(profile.at(2 * kUsPerMonth), 40);
+    CHECK_EQ(profile.at(3 * kUsPerMonth), 80);
+    // And halfway between two knots the value is halfway between them.
+    CHECK_EQ(profile.at(2 * kUsPerMonth + kUsPerMonth / 2), 60);
+    // Months with no knot are zero.
+    CHECK_EQ(profile.at(0), 0);
+
+    // The integral over March is the trapezoid of its two knots.
+    const std::int64_t march = profile.cumulative(3 * kUsPerMonth) - profile.cumulative(2 * kUsPerMonth);
+    CHECK_EQ(march, (40 + 80) * kSecondsPerMonth / 2);
 }
 
 // --- the evaluator owns time ----------------------------------------------
@@ -226,53 +255,65 @@ static void testAccumulatorExactness() {
     CHECK_EQ(acc.whole, rate * one_second / 1000000);
 }
 
-// --- crops grow and wither by season --------------------------------------
+// --- growth follows the month coefficients --------------------------------
 
-static void testCropsGrowInSpringAndSummer() {
-    std::unique_ptr<IEvaluator> spring = evaluatorWith(1, 0, 1);  // day 1
-    spring->makeStep(kUsPerDay);
-    CHECK_EQ(firstCropGrowth(*spring), 86400);  // 1 unit per second for a day
-
-    std::unique_ptr<IEvaluator> summer = evaluatorWith(1, 0, 100);  // day 100
-    summer->makeStep(kUsPerDay);
-    CHECK_EQ(firstCropGrowth(*summer), 86400);
-}
-
-static void testCropsAreDormantInWinter() {
-    std::unique_ptr<IEvaluator> winter = evaluatorWith(1, 0, 271);
-    winter->makeStep(kUsPerDay);
-    CHECK_EQ(firstCropGrowth(*winter), 0);
-}
-
-static void testCropsWitherInAutumn() {
-    // Summer day grows, the next day is autumn and takes it back down.
-    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 180, 1, 1);
+static void testCropsGrowWithPositiveCoefficient() {
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 1);
     ev->makeStep(kUsPerDay);
     CHECK_EQ(firstCropGrowth(*ev), 86400);
+}
+
+static void testCropsStandStillAtZeroCoefficient() {
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 1, 1, flatProfile(0));
     ev->makeStep(kUsPerDay);
     CHECK_EQ(firstCropGrowth(*ev), 0);
 }
 
 static void testWitheringStopsAtZero() {
-    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 200, 1, 5);  // autumn, fast wither
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 1, 1, flatProfile(-100));
     ev->makeStep(kUsPerDay);
-    const PlantSystem* p = plants(*ev);
-    CHECK(p != nullptr);
-    if (p != nullptr && !p->crops().empty()) {
-        CHECK_EQ(p->crops()[0].growth_sum, 0);
-        CHECK_EQ(p->crops()[0].growth(), 0);
-    }
+    CHECK_EQ(firstCropGrowth(*ev), 0);
 }
 
-// --- the headline property: a season boundary does not depend on dt -------
+static void testGrowthFollowsTheInterpolatedKnot() {
+    // Only May carries a knot (100). The interpolation is what matters: the ramp up
+    // happens during April, from 0 to 100, and the ramp down during May, from 100
+    // back to 0. A crop sown on day 1 collects half a month of full rate while April
+    // runs, and the other half while May runs.
+    MonthProfile profile;
+    profile.setMonth(5, 100);
 
-static void testSeasonBoundaryIsDtInvariant() {
-    // Four days from day 178: three of growth, then the boundary into autumn, then
-    // a day of withering. Every step size must reach the same world.
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 1, 1, profile);
+
+    ev->makeStep(59 * kUsPerDay);  // still February: no ramp has started
+    CHECK_EQ(firstCropGrowth(*ev), 0);
+
+    ev->makeStep(61 * kUsPerDay);  // through the end of April: half the ramp
+    CHECK_EQ(firstCropGrowth(*ev), kSecondsPerMonth / 2);
+
+    ev->makeStep(30 * kUsPerDay);  // through the end of May: the whole trapezoid
+    CHECK_EQ(firstCropGrowth(*ev), kSecondsPerMonth);
+
+    ev->makeStep(30 * kUsPerDay);  // June onward: the knot is behind us
+    CHECK_EQ(firstCropGrowth(*ev), kSecondsPerMonth);
+}
+
+// --- the headline property: the step size cannot matter --------------------
+
+static void testGrowthIsIndependentOfTheStep() {
+    // Four days from day 100: April 0.8 rising towards May 1.0. The coefficient is
+    // not constant, which is exactly why this must be evaluated and not accumulated.
+    MonthProfile profile;
+    profile.setMonth(3, 40);
+    profile.setMonth(4, 80);
+    profile.setMonth(5, 100);
+    profile.setMonth(6, 100);
+    profile.setMonth(9, -50);
+    profile.setMonth(10, -100);
+
     const std::int64_t total = 4 * kUsPerDay;
-
-    auto run = [total](std::int64_t dt) {
-        std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42, 178, 8, 600);
+    auto run = [total, &profile](std::int64_t dt) {
+        std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42, 100, 8, profile);
         std::int64_t done = 0;
         while (done < total) {
             const std::int64_t slice = std::min(dt, total - done);
@@ -283,16 +324,9 @@ static void testSeasonBoundaryIsDtInvariant() {
     };
 
     const std::uint64_t one_second = run(1000000);
-    CHECK_EQ(run(3600000000), one_second);   // hour steps: land exactly on the boundary
-    CHECK_EQ(run(25200000000), one_second);  // seven-hour steps: the boundary falls inside one
+    CHECK_EQ(run(3600000000), one_second);   // hour steps
+    CHECK_EQ(run(25200000000), one_second);  // seven-hour steps
     CHECK_EQ(run(total), one_second);        // one single four-day step
-
-    // And the amount itself: three days growing at 1000, one day withering at 600.
-    std::unique_ptr<IEvaluator> ev = evaluatorWith(1000, 42, 178, 8, 600);
-    for (int i = 0; i < 4; ++i) {
-        ev->makeStep(kUsPerDay);
-    }
-    CHECK_EQ(firstCropGrowth(*ev), 3 * 86400 * 1000 - 86400 * 600);
 }
 
 // --- general invariance and determinism -----------------------------------
@@ -314,7 +348,7 @@ static void testDtInvariance() {
     const std::uint64_t once = run(total);
     CHECK_EQ(run(total / 2), once);
     CHECK_EQ(run(total / 96), once);
-    CHECK_EQ(run(1000000), once);
+    CHECK_EQ(run(total / 2400), once);
 }
 
 static void testDeterminism() {
@@ -415,10 +449,13 @@ static void testScenarioLoading() {
     if (!ok) {
         return;
     }
-    CHECK_EQ(sc.start_day, 178);
+    CHECK_EQ(sc.start_day, 100);
     CHECK_EQ(sc.crop_count, 8);
     CHECK_EQ(sc.crop_rate, 1000);
-    CHECK_EQ(sc.wither_rate, 600);
+    CHECK_EQ(sc.coefficient[2], 40);   // March
+    CHECK_EQ(sc.coefficient[3], 80);   // April
+    CHECK_EQ(sc.coefficient[8], -50);  // September
+    CHECK_EQ(sc.coefficient[11], 0);   // December
     CHECK_EQ(sc.steps, 345600);
     CHECK_EQ(sc.dt_us, 1000000);
     CHECK(sc.seed == 1);
@@ -505,7 +542,7 @@ static void testBuildEvaluator() {
     CHECK(plants(*ev) != nullptr);
     if (plants(*ev) != nullptr) {
         CHECK_EQ(plants(*ev)->crops().size(), 3u);
-        CHECK_EQ(plants(*ev)->growthRate(), 250);
+        CHECK_EQ(plants(*ev)->baseRate(), 250);
         CHECK_EQ(plants(*ev)->crops()[0].x, 0);
         CHECK_EQ(plants(*ev)->crops()[2].x, 2);
     }
@@ -673,16 +710,17 @@ struct TestEntry {
 static const TestEntry kTests[] = {
     {"calendar", testCalendar},
     {"seasons", testSeasons},
+    {"month profile", testMonthProfileInterpolates},
     {"clock", testClock},
     {"start day honoured", testStartDayIsHonoured},
     {"signals apply on boundary", testSignalsApplyOnBoundary},
     {"acceleration mode", testAccelerationMode},
     {"accumulator exactness", testAccumulatorExactness},
-    {"crops grow", testCropsGrowInSpringAndSummer},
-    {"crops dormant in winter", testCropsAreDormantInWinter},
-    {"crops wither", testCropsWitherInAutumn},
+    {"crops grow", testCropsGrowWithPositiveCoefficient},
+    {"zero coefficient", testCropsStandStillAtZeroCoefficient},
     {"wither stops at zero", testWitheringStopsAtZero},
-    {"season boundary invariant", testSeasonBoundaryIsDtInvariant},
+    {"growth follows the knot", testGrowthFollowsTheInterpolatedKnot},
+    {"growth ignores the step", testGrowthIsIndependentOfTheStep},
     {"dt invariance", testDtInvariance},
     {"determinism", testDeterminism},
     {"hash sensitivity", testHashSensitivity},
@@ -754,6 +792,19 @@ static void runBenchmark(std::int64_t steps) {
                     static_cast<long long>(days), static_cast<long long>(need), real_seconds);
     }
     std::printf("    (OD-33 targets: a week in <=15 s, two or three months in <=30 s)\n");
+
+    // The same span stepped, and then skipped. Plant growth is a closed form, so
+    // evaluating it once at the end must be worth far more than evaluating it at
+    // every step - that difference is the whole premise of the prediction graph.
+    std::unique_ptr<IEvaluator> skipped = evaluatorWith(1000, 42, 1, 8);
+    const std::int64_t s0 = now_us();
+    skipped->makeStep(steps * dt_us);
+    const std::int64_t s1 = now_us();
+    const double skip_seconds = (s1 - s0) > 0 ? static_cast<double>(s1 - s0) / 1e6 : 1e-6;
+    std::printf("\n  same span, stepped versus skipped:\n");
+    std::printf("    stepped  %10.3f s\n", seconds);
+    std::printf("    skipped  %10.6f s  (one evaluation)\n", skip_seconds);
+    std::printf("    ratio    %10.0fx\n", seconds / skip_seconds);
 }
 
 int main(int argc, char** argv) {
