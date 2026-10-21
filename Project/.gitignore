@@ -5,3 +5,7 @@
 *.obj
 *.exe
 *.pdb
+
+# Per-agent build directories. Each agent builds into its own so that CMake and make
+# are never invoked twice in one directory.
+/build-*/
