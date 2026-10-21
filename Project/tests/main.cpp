@@ -23,6 +23,7 @@
 #include "core/scenario.h"
 #include "core/month_profile.h"
 #include "core/season.h"
+#include "core/weather.h"
 #include "core/world.h"
 #include "runtime/scheduler.h"
 #include "runtime/time_source.h"
@@ -59,7 +60,6 @@ static void report(bool ok, const char* file, int line, const char* what,
                #a " == " #b, check_a_value_, check_b_value_, true); \
     } while (false)
 
-// A run with a set number of crops and a chosen start day.
 // A profile with the same coefficient in every month: growth is then just
 // base_rate times elapsed seconds, which keeps test expectations readable.
 static MonthProfile flatProfile(std::int64_t coefficient) {
@@ -70,11 +70,14 @@ static MonthProfile flatProfile(std::int64_t coefficient) {
     return profile;
 }
 
-static std::unique_ptr<IEvaluator> evaluatorWith(std::int64_t crop_rate,
-                                                 std::uint64_t seed = 0,
-                                                 std::int64_t start_day = 1,
-                                                 std::int64_t crop_count = 1,
-                                                 const MonthProfile& profile = flatProfile(100)) {
+// A run with a set number of crops and a chosen start day.
+static std::unique_ptr<IEvaluator> evaluatorWith(
+    std::int64_t crop_rate,
+    std::uint64_t seed = 0,
+    std::int64_t start_day = 1,
+    std::int64_t crop_count = 1,
+    const MonthProfile& profile = flatProfile(100),
+    const MonthProfile& temperature = flatProfile(0)) {
     Scenario sc;
     sc.seed = seed;
     sc.start_day = start_day;
@@ -82,6 +85,7 @@ static std::unique_ptr<IEvaluator> evaluatorWith(std::int64_t crop_rate,
     sc.crop_rate = crop_rate;
     for (int month = 0; month < kMonthsPerYear; ++month) {
         sc.coefficient[month] = profile.coefficient(month + 1);
+        sc.temperature[month] = temperature.coefficient(month + 1);
     }
     return buildEvaluator(sc);
 }
@@ -96,6 +100,17 @@ static const PlantSystem* plants(const World& w) {
 }
 
 static const PlantSystem* plants(const IEvaluator& ev) { return plants(ev.world()); }
+
+static const WeatherSystem* weather(const World& w) {
+    for (const auto& system : w.systems()) {
+        if (const auto* c = dynamic_cast<const WeatherSystem*>(system.get())) {
+            return c;
+        }
+    }
+    return nullptr;
+}
+
+static const WeatherSystem* weather(const IEvaluator& ev) { return weather(ev.world()); }
 
 // Growth of the first crop, in whole units.
 static std::int64_t firstCropGrowth(const IEvaluator& ev) {
@@ -380,6 +395,91 @@ static void testHashSensitivity() {
 
     // And the world RNG.
     CHECK(evaluatorWith(0, 1)->hash() != evaluatorWith(0, 2)->hash());
+
+    // Weather is covered too, but only after a step: the temperature is computed in
+    // step(), so two freshly built evaluators are both still at zero.
+    std::unique_ptr<IEvaluator> cool = evaluatorWith(0, 0, 1, 0, flatProfile(0), flatProfile(500));
+    std::unique_ptr<IEvaluator> hot = evaluatorWith(0, 0, 1, 0, flatProfile(0), flatProfile(1500));
+    cool->makeStep(kUsPerDay);
+    hot->makeStep(kUsPerDay);
+    CHECK(cool->hash() != hot->hash());
+}
+
+// --- weather: temperature as a function of the clock ----------------------
+
+static void testWeatherKnotsAreExactAtMonthStarts() {
+    MonthProfile profile;
+    profile.setMonth(3, 500);   // 5.00 degrees at the start of March
+    profile.setMonth(4, 1200);  // 12.00 at the start of April
+
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0, 0, 1, 0, flatProfile(0), profile);
+
+    ev->makeStep(30 * kUsPerDay);  // start of February: no knot here, so zero
+    CHECK(weather(*ev) != nullptr);
+    CHECK_EQ(weather(*ev)->temperature(), 0);
+
+    ev->makeStep(30 * kUsPerDay);  // start of March: the knot itself
+    CHECK_EQ(weather(*ev)->temperature(), 500);
+
+    ev->makeStep(30 * kUsPerDay);  // start of April: the next knot
+    CHECK_EQ(weather(*ev)->temperature(), 1200);
+
+    ev->makeStep(30 * kUsPerDay);  // start of May: unset again, so back to zero
+    CHECK_EQ(weather(*ev)->temperature(), 0);
+}
+
+static void testWeatherInterpolatesBetweenKnots() {
+    MonthProfile profile;
+    profile.setMonth(3, 500);
+    profile.setMonth(4, 1200);
+
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0, 0, 1, 0, flatProfile(0), profile);
+
+    // Halfway through March the value sits halfway between 500 and 1200.
+    ev->makeStep(75 * kUsPerDay);
+    CHECK_EQ(weather(*ev)->temperature(), 850);
+}
+
+static void testWeatherChangesWithTheClock() {
+    MonthProfile profile;
+    profile.setMonth(5, 1800);
+
+    std::unique_ptr<IEvaluator> ev = evaluatorWith(0, 0, 1, 0, flatProfile(0), profile);
+    ev->makeStep(kUsPerDay);
+    const std::int64_t first = weather(*ev)->temperature();
+
+    ev->makeStep(100 * kUsPerDay);
+    const std::int64_t later = weather(*ev)->temperature();
+
+    CHECK(first != later);
+    CHECK(later > first);  // climbing towards the May knot
+}
+
+static void testWeatherIsReproducible() {
+    MonthProfile profile;
+    profile.setMonth(5, 1800);
+
+    std::unique_ptr<IEvaluator> a = evaluatorWith(0, 7, 1, 0, flatProfile(0), profile);
+    std::unique_ptr<IEvaluator> b = evaluatorWith(0, 7, 1, 0, flatProfile(0), profile);
+    for (int i = 0; i < 100; ++i) {
+        a->makeStep(kUsPerDay);
+        b->makeStep(kUsPerDay);
+    }
+    CHECK_EQ(a->hash(), b->hash());
+    CHECK_EQ(weather(*a)->temperature(), weather(*b)->temperature());
+}
+
+static void testZeroTemperatureLeavesPlantsAlone() {
+    // All-zero temperature is the default everywhere else, so this pins two things at
+    // once: zero weather is valid, and crops do not read it. Wiring them together is a
+    // later decision and must not happen by accident.
+    std::unique_ptr<IEvaluator> cold = evaluatorWith(1, 0, 1, 1, flatProfile(100), flatProfile(0));
+    cold->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*cold), 86400);
+
+    std::unique_ptr<IEvaluator> warm = evaluatorWith(1, 0, 1, 1, flatProfile(100), flatProfile(2000));
+    warm->makeStep(kUsPerDay);
+    CHECK_EQ(firstCropGrowth(*warm), 86400);
 }
 
 // --- settings live outside the simulation ---------------------------------
@@ -456,6 +556,9 @@ static void testScenarioLoading() {
     CHECK_EQ(sc.coefficient[3], 80);   // April
     CHECK_EQ(sc.coefficient[8], -50);  // September
     CHECK_EQ(sc.coefficient[11], 0);   // December
+    CHECK_EQ(sc.temperature[0], -500);  // January
+    CHECK_EQ(sc.temperature[6], 2100);  // July
+    CHECK_EQ(sc.temperature[11], -300); // December
     CHECK_EQ(sc.steps, 345600);
     CHECK_EQ(sc.dt_us, 1000000);
     CHECK(sc.seed == 1);
@@ -538,8 +641,9 @@ static void testBuildEvaluator() {
     sc.crop_rate = 250;
     std::unique_ptr<IEvaluator> ev = buildEvaluator(sc);
 
-    CHECK_EQ(ev->world().systems().size(), 1u);
+    CHECK_EQ(ev->world().systems().size(), 2u);
     CHECK(plants(*ev) != nullptr);
+    CHECK(weather(*ev) != nullptr);
     if (plants(*ev) != nullptr) {
         CHECK_EQ(plants(*ev)->crops().size(), 3u);
         CHECK_EQ(plants(*ev)->baseRate(), 250);
@@ -721,6 +825,11 @@ static const TestEntry kTests[] = {
     {"wither stops at zero", testWitheringStopsAtZero},
     {"growth follows the knot", testGrowthFollowsTheInterpolatedKnot},
     {"growth ignores the step", testGrowthIsIndependentOfTheStep},
+    {"weather knots", testWeatherKnotsAreExactAtMonthStarts},
+    {"weather interpolation", testWeatherInterpolatesBetweenKnots},
+    {"weather follows the clock", testWeatherChangesWithTheClock},
+    {"weather reproducible", testWeatherIsReproducible},
+    {"zero temperature", testZeroTemperatureLeavesPlantsAlone},
     {"dt invariance", testDtInvariance},
     {"determinism", testDeterminism},
     {"hash sensitivity", testHashSensitivity},

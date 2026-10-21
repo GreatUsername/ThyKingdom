@@ -32,6 +32,10 @@ struct Scenario {
     // knots at month starts.
     std::int64_t coefficient[kMonthsPerYear] = {};
 
+    // Temperature at the start of each month, hundredths of a degree. Also
+    // interpolated linearly between knots.
+    std::int64_t temperature[kMonthsPerYear] = {};
+
     // What the run is.
     std::int64_t steps = 0;
     std::int64_t dt_us = 0;

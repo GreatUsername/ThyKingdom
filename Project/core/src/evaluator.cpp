@@ -2,6 +2,7 @@
 
 #include "core/plants.h"
 #include "core/scenario.h"
+#include "core/weather.h"
 
 namespace core {
 
@@ -13,13 +14,21 @@ namespace core {
 static World buildWorld(const Scenario& scenario, std::int64_t start_us) {
     World world;
 
+    // The order of addSystem calls is the order systems run in, and it is stated
+    // once, here. Weather goes first: 06 says the atmosphere is computed before
+    // what grows under it, so a system that later reads the temperature sees the
+    // value for this instant rather than the previous one.
+    MonthProfile weather_profile;
+    for (int month = 1; month <= kMonthsPerYear; ++month) {
+        weather_profile.setMonth(month, scenario.temperature[month - 1]);
+    }
+    world.addSystem(std::unique_ptr<System>(new WeatherSystem(weather_profile)));
+
     MonthProfile profile;
     for (int month = 1; month <= kMonthsPerYear; ++month) {
         profile.setMonth(month, scenario.coefficient[month - 1]);
     }
 
-    // The order of addSystem calls is the order systems run in, and it is stated
-    // once, here.
     PlantSystem* plants = new PlantSystem(scenario.crop_rate, profile);
     for (std::int64_t i = 0; i < scenario.crop_count; ++i) {
         // A placeholder layout until the map exists: fertile cells will decide

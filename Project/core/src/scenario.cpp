@@ -31,9 +31,9 @@ bool parseI64(const std::string& s, std::int64_t& out) {
     return true;
 }
 
-// "growth.m7" -> 7, otherwise 0.
-int growthMonth(const std::string& key) {
-    const std::string prefix = "growth.m";
+// "growth.m7" -> 7, "weather.m12" -> 12, otherwise 0.
+int monthFromKey(const std::string& key, const char* section) {
+    const std::string prefix = std::string(section) + ".m";
     if (key.size() <= prefix.size() || key.compare(0, prefix.size(), prefix) != 0) {
         return 0;
     }
@@ -80,12 +80,16 @@ bool loadScenario(const std::string& path, Scenario& out, std::string& error) {
         } else if (full == "expect.hash") {
             out.expect_hash = static_cast<std::uint64_t>(iv);
         } else {
-            const int month = growthMonth(full);
-            if (month == 0) {
+            const int growth_month = monthFromKey(full, "growth");
+            const int weather_month = monthFromKey(full, "weather");
+            if (growth_month != 0) {
+                out.coefficient[growth_month - 1] = iv;
+            } else if (weather_month != 0) {
+                out.temperature[weather_month - 1] = iv;
+            } else {
                 error = "line " + std::to_string(e.line) + ": unknown key '" + full + "'";
                 return false;
             }
-            out.coefficient[month - 1] = iv;
         }
     }
 

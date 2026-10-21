@@ -10,6 +10,7 @@ set(HEADERS
   include/core/control_signal.h
   include/core/system.h
   include/core/plants.h
+  include/core/weather.h
   include/core/world.h
   include/core/evaluator.h
   include/core/hash.h
@@ -25,6 +26,7 @@ add_library(core STATIC
   src/world.cpp
   src/evaluator.cpp
   src/plants.cpp
+  src/weather.cpp
   ${HEADERS}
 )
 
