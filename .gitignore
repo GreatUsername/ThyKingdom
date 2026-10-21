@@ -1,3 +1,7 @@
 # Python bytecode caches: regenerated on every run, never worth versioning.
 __pycache__/
 *.py[cod]
+
+# Agent mailbox: live correspondence between concurrent agents, not history.
+# Anything worth keeping is moved into the Codex by the Scribe.
+.agents/
