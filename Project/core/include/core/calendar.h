@@ -1,33 +1,26 @@
-// The game clock.
+// The calendar: the single time type of the simulation.
 //
-// Game time is an integer count of microseconds since the start of year 1.
-// Integers rather than floating point: the world state has to be hashable and
-// reproducible, and an integer clock is exactly that.
+// Game time is an integer count of microseconds since the start of year 1. Integers
+// rather than floating point: world state has to be hashable and reproducible, and an
+// integer calendar is exactly that.
 //
-// Systems never read machine time. They read this, which is why a run can be
-// replayed: the clock is the only source of "now" in the simulation.
+// The calendar is world state, so the world owns it: two worlds at different instants
+// are different worlds. Deciding *when* time moves is a matter of control, so that
+// stays with the Evaluator, which moves time by telling the world to step.
+//
+// Systems never read machine time. They read this, which is why a run can be replayed:
+// the calendar is the only source of "now" in the simulation.
 #pragma once
 
 #include <cstdint>
 
+#include "core/season.h"
+
 namespace core {
 
-class Clock {
-public:
-    Clock() = default;
-    explicit Clock(std::int64_t now_us) : m_now_us(now_us) {}
-
-    std::int64_t now_us() const { return m_now_us; }
-    void advance(std::int64_t dt_us) { m_now_us += dt_us; }
-
-private:
-    std::int64_t m_now_us = 0;
-};
-
-// Calendar conversion lives beside the clock because it is the same quantity seen
-// differently: 12 months of 30 days, 24 hours a day, 360 days a year (OD-31).
-// Exact integer arithmetic, no month-length table, no leap years. If real month
-// lengths are ever wanted, the month table becomes data; the clock stays integer.
+// 12 months of 30 days, 24 hours a day, 360 days a year (OD-31). Exact integer
+// arithmetic, no month-length table, no leap years. If real month lengths are ever
+// wanted, the month table becomes data; the calendar stays integer.
 constexpr std::int64_t kUsPerSecond = 1'000'000;
 constexpr std::int64_t kUsPerMinute = 60 * kUsPerSecond;
 constexpr std::int64_t kUsPerHour = 60 * kUsPerMinute;
@@ -87,5 +80,34 @@ inline std::int64_t fromCalendar(const CalendarDate& d) {
          + static_cast<std::int64_t>(d.second) * kUsPerSecond
          + d.microsecond;
 }
+
+// Season of an instant, derived from the month it falls in. It lives here rather than
+// in season.h because reading a season means reading the calendar; season.h stays a
+// leaf so that this header can include it.
+inline Season seasonAt(std::int64_t us) { return seasonOfMonth(monthOf(us)); }
+
+class Calendar {
+public:
+    Calendar() = default;
+    explicit Calendar(std::int64_t now_us) : m_now_us(now_us) {}
+
+    std::int64_t now_us() const { return m_now_us; }
+    int month() const { return monthOf(m_now_us); }
+    Season season() const { return seasonOfMonth(monthOf(m_now_us)); }
+    CalendarDate date() const { return toCalendar(m_now_us); }
+
+    // Advances time and returns how many month boundaries were crossed. Zero on almost
+    // every step; the caller decides what to do with it. A count rather than a callback:
+    // it allocates nothing on the hot path, has no hidden invocation order, and is
+    // trivial to test.
+    std::int64_t advance(std::int64_t dt_us) {
+        const std::int64_t months_before = m_now_us / kUsPerMonth;
+        m_now_us += dt_us;
+        return m_now_us / kUsPerMonth - months_before;
+    }
+
+private:
+    std::int64_t m_now_us = 0;
+};
 
 }  // namespace core

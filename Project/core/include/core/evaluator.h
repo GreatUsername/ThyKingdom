@@ -1,9 +1,10 @@
 // The Evaluator: the class that controls a run.
 //
-// It sits above the world. It owns the simulation clock and the acceleration mode,
-// accumulates incoming control signals, and advances time. The world below it holds
-// only simulated entities and knows nothing about time or control - the clock is
-// state-control duty, so it belongs to whoever controls state.
+// It sits above the world. It owns the acceleration mode, accumulates incoming control
+// signals, and decides when a step happens. Time itself is world state and lives in the
+// world's Calendar; the evaluator is what moves it, by telling the world to step. That
+// split is why two worlds at different instants are different worlds, while the decision
+// to advance is control.
 //
 // It does not know about player settings. Those are changed while the game is
 // paused or not running, and they never affect the simulation, so the evaluator has
@@ -21,7 +22,7 @@
 #include <memory>
 #include <vector>
 
-#include "core/clock.h"
+#include "core/calendar.h"
 #include "core/control_signal.h"
 #include "core/hash.h"
 #include "core/world.h"
@@ -50,7 +51,7 @@ public:
     virtual std::size_t pendingSignals() const = 0;
 
     virtual std::uint64_t hash() const = 0;
-    virtual const Clock& clock() const = 0;
+    virtual const Calendar& calendar() const = 0;
     virtual const World& world() const = 0;
 
     virtual Mode mode() const = 0;
@@ -75,7 +76,7 @@ public:
     std::size_t pendingSignals() const override { return m_pending.size(); }
 
     std::uint64_t hash() const override;
-    const Clock& clock() const override { return m_clock; }
+    const Calendar& calendar() const override { return m_world.calendar(); }
     const World& world() const override { return m_world; }
 
     Mode mode() const override { return m_mode; }
@@ -85,7 +86,6 @@ public:
 private:
     void applyPendingSignals();
 
-    Clock m_clock;
     World m_world;
     // Steps taken. Run bookkeeping, never hashed: see stepsTaken().
     std::int64_t m_step_count = 0;
@@ -95,7 +95,7 @@ private:
     std::int64_t m_acceleration_remaining_us = 0;
 };
 
-// The generating mechanism: creates the clock, builds the world and its systems,
+// The generating mechanism: builds the world, its calendar and its systems,
 // and returns a run ready to advance.
 std::unique_ptr<IEvaluator> buildEvaluator(const Scenario& scenario);
 

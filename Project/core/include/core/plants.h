@@ -1,6 +1,6 @@
 // Biological growth of plants, crops in particular.
 //
-// A crop sits on a piece of land and its growth is a function of the clock: the
+// A crop sits on a piece of land and its growth is a function of the calendar: the
 // integral of the month coefficient curve since it was sown, scaled by the base
 // rate, and never below zero. Nothing accumulates step by step.
 //
@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "core/hash.h"
-#include "core/month_profile.h"
+#include "core/month_curve.h"
 #include "core/system.h"
 
 namespace core {
@@ -32,30 +32,30 @@ struct Crop {
     // at the current instant minus this, so a step evaluates one curve instead
     // of two.
     std::int64_t sowed_integral = 0;
-    std::int64_t growth = 0;  // units, evaluated from the clock
+    std::int64_t growth = 0;  // units, evaluated from the calendar
 };
 
 class PlantSystem final : public System {
 public:
-    PlantSystem(std::int64_t base_rate, MonthProfile profile);
+    PlantSystem(std::int64_t base_rate, GrowthCurve profile);
 
     void sow(std::int32_t x, std::int32_t y, std::int64_t now_us);
 
     // The signature has to accept dt, but growth does not use it: the state is a
-    // function of the clock, so the step only decides *when* the value is refreshed.
-    void step(Clock& clock, std::int64_t dt_us) override;
+    // function of the calendar, so the step only decides *when* the value is refreshed.
+    void step(Calendar& calendar, std::int64_t dt_us) override;
     void hash(Hash64& h) const override;
 
     const std::vector<Crop>& crops() const { return m_crops; }
     std::int64_t baseRate() const { return m_base_rate; }
-    const MonthProfile& profile() const { return m_profile; }
+    const GrowthCurve& profile() const { return m_profile; }
 
 private:
     std::int64_t growthAt(std::int64_t sowed_integral, std::int64_t now_us) const;
 
     std::vector<Crop> m_crops;
     std::int64_t m_base_rate = 0;  // units per second at coefficient 100
-    MonthProfile m_profile;
+    GrowthCurve m_profile;
 };
 
 }  // namespace core

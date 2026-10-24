@@ -2,7 +2,7 @@
 
 namespace core {
 
-PlantSystem::PlantSystem(std::int64_t base_rate, MonthProfile profile)
+PlantSystem::PlantSystem(std::int64_t base_rate, GrowthCurve profile)
     : m_base_rate(base_rate), m_profile(profile) {}
 
 void PlantSystem::sow(std::int32_t x, std::int32_t y, std::int64_t now_us) {
@@ -25,9 +25,9 @@ std::int64_t PlantSystem::growthAt(std::int64_t sowed_integral, std::int64_t now
     return grown;
 }
 
-void PlantSystem::step(Clock& clock, std::int64_t dt_us) {
+void PlantSystem::step(Calendar& calendar, std::int64_t dt_us) {
     (void)dt_us;
-    const std::int64_t now = clock.now_us();
+    const std::int64_t now = calendar.now_us();
     for (Crop& crop : m_crops) {
         crop.growth = growthAt(crop.sowed_integral, now);
     }

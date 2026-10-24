@@ -14,14 +14,14 @@
 
 #include "config/settings.h"
 #include "core/accumulator.h"
-#include "core/clock.h"
+#include "core/calendar.h"
 #include "core/control_signal.h"
 #include "core/evaluator.h"
 #include "core/hash.h"
 #include "core/plants.h"
 #include "core/rng.h"
 #include "core/scenario.h"
-#include "core/month_profile.h"
+#include "core/month_curve.h"
 #include "core/season.h"
 #include "core/weather.h"
 #include "core/world.h"
@@ -60,14 +60,24 @@ static void report(bool ok, const char* file, int line, const char* what,
                #a " == " #b, check_a_value_, check_b_value_, true); \
     } while (false)
 
-// A profile with the same coefficient in every month: growth is then just
-// base_rate times elapsed seconds, which keeps test expectations readable.
-static MonthProfile flatProfile(std::int64_t coefficient) {
-    MonthProfile profile;
+// A curve with the same coefficient in every month: growth is then just base_rate
+// times elapsed seconds, which keeps test expectations readable.
+static GrowthCurve flatProfile(std::int64_t coefficient) {
+    GrowthCurve profile;
     for (int month = 1; month <= kMonthsPerYear; ++month) {
         profile.setMonth(month, coefficient);
     }
     return profile;
+}
+
+// The same shape for temperature. It is a different tagged instantiation, so it cannot
+// be passed where a growth curve is expected - which is the point of the tags.
+static TemperatureCurve flatTemperature(std::int64_t coefficient) {
+    TemperatureCurve curve;
+    for (int month = 1; month <= kMonthsPerYear; ++month) {
+        curve.setMonth(month, coefficient);
+    }
+    return curve;
 }
 
 // A run with a set number of crops and a chosen start day.
@@ -76,8 +86,8 @@ static std::unique_ptr<IEvaluator> evaluatorWith(
     std::uint64_t seed = 0,
     std::int64_t start_day = 1,
     std::int64_t crop_count = 1,
-    const MonthProfile& profile = flatProfile(100),
-    const MonthProfile& temperature = flatProfile(0)) {
+    const GrowthCurve& profile = flatProfile(100),
+    const TemperatureCurve& temperature = flatTemperature(0)) {
     Scenario sc;
     sc.seed = seed;
     sc.start_day = start_day;
@@ -172,7 +182,7 @@ static void testSeasons() {
 }
 
 static void testMonthProfileInterpolates() {
-    MonthProfile profile;
+    GrowthCurve profile;
     profile.setMonth(3, 40);
     profile.setMonth(4, 80);
 
@@ -191,19 +201,49 @@ static void testMonthProfileInterpolates() {
 
 // --- the evaluator owns time ----------------------------------------------
 
-static void testClock() {
+static void testCalendarAdvances() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0);
     const std::int64_t dt = 1000;
     for (int i = 0; i < 1000; ++i) {
         ev->makeStep(dt);
     }
-    CHECK_EQ(ev->clock().now_us(), 1000 * dt);
+    CHECK_EQ(ev->calendar().now_us(), 1000 * dt);
+}
+
+static void testCalendarCountsMonthBoundaries() {
+    // A month boundary is crossed when the calendar enters a month, and the count is
+    // what advance() reports. Nothing consumes it yet, which is exactly why it is
+    // worth pinning down now.
+    Calendar calendar;
+    CHECK_EQ(calendar.month(), 1);
+    CHECK_EQ(calendar.advance(kUsPerDay), 0);  // a day crosses nothing
+
+    // The last microsecond of January, then one more: exactly one boundary.
+    Calendar january(29 * kUsPerDay + kUsPerDay - 1);
+    CHECK_EQ(january.month(), 1);
+    CHECK_EQ(january.advance(1), 1);
+    CHECK_EQ(january.month(), 2);
+
+    // Crossing a year end counts the boundary, not the year.
+    Calendar december(11 * kUsPerMonth + kUsPerMonth - 1);
+    CHECK_EQ(december.month(), 12);
+    CHECK_EQ(december.advance(1), 1);
+    CHECK_EQ(december.month(), 1);
+    CHECK_EQ(december.date().year, 2);
+
+    // A long span reports every boundary it crossed.
+    Calendar span;
+    CHECK_EQ(span.advance(3 * kUsPerMonth), 3);
+
+    // Season and date are readings of the same instant.
+    CHECK(Calendar(2 * kUsPerMonth).season() == Season::Spring);
+    CHECK_EQ(Calendar(2 * kUsPerMonth).date().month, 3);
 }
 
 static void testStartDayIsHonoured() {
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0, 0, 178);
-    CHECK_EQ(ev->clock().now_us(), 177 * kUsPerDay);
-    CHECK(seasonAt(ev->clock().now_us()) == Season::Summer);
+    CHECK_EQ(ev->calendar().now_us(), 177 * kUsPerDay);
+    CHECK(seasonAt(ev->calendar().now_us()) == Season::Summer);
 }
 
 static void testSignalsApplyOnBoundary() {
@@ -226,7 +266,7 @@ static void testAccelerationMode() {
     ev->makeStep(600);
     CHECK(ev->mode() == Mode::Normal);
     CHECK_EQ(ev->accelerationRemaining_us(), 0);
-    CHECK_EQ(ev->clock().now_us(), 1000);
+    CHECK_EQ(ev->calendar().now_us(), 1000);
 
     ev->pushSignal(ControlSignal{SignalKind::BeginAcceleration, 100000});
     ev->makeStep(10);
@@ -295,7 +335,7 @@ static void testGrowthFollowsTheInterpolatedKnot() {
     // happens during April, from 0 to 100, and the ramp down during May, from 100
     // back to 0. A crop sown on day 1 collects half a month of full rate while April
     // runs, and the other half while May runs.
-    MonthProfile profile;
+    GrowthCurve profile;
     profile.setMonth(5, 100);
 
     std::unique_ptr<IEvaluator> ev = evaluatorWith(1, 0, 1, 1, profile);
@@ -318,7 +358,7 @@ static void testGrowthFollowsTheInterpolatedKnot() {
 static void testGrowthIsIndependentOfTheStep() {
     // Four days from day 100: April 0.8 rising towards May 1.0. The coefficient is
     // not constant, which is exactly why this must be evaluated and not accumulated.
-    MonthProfile profile;
+    GrowthCurve profile;
     profile.setMonth(3, 40);
     profile.setMonth(4, 80);
     profile.setMonth(5, 100);
@@ -398,8 +438,8 @@ static void testHashSensitivity() {
 
     // Weather is covered too, but only after a step: the temperature is computed in
     // step(), so two freshly built evaluators are both still at zero.
-    std::unique_ptr<IEvaluator> cool = evaluatorWith(0, 0, 1, 0, flatProfile(0), flatProfile(500));
-    std::unique_ptr<IEvaluator> hot = evaluatorWith(0, 0, 1, 0, flatProfile(0), flatProfile(1500));
+    std::unique_ptr<IEvaluator> cool = evaluatorWith(0, 0, 1, 0, flatProfile(0), flatTemperature(500));
+    std::unique_ptr<IEvaluator> hot = evaluatorWith(0, 0, 1, 0, flatProfile(0), flatTemperature(1500));
     cool->makeStep(kUsPerDay);
     hot->makeStep(kUsPerDay);
     CHECK(cool->hash() != hot->hash());
@@ -408,7 +448,7 @@ static void testHashSensitivity() {
 // --- weather: temperature as a function of the clock ----------------------
 
 static void testWeatherKnotsAreExactAtMonthStarts() {
-    MonthProfile profile;
+    TemperatureCurve profile;
     profile.setMonth(3, 500);   // 5.00 degrees at the start of March
     profile.setMonth(4, 1200);  // 12.00 at the start of April
 
@@ -429,7 +469,7 @@ static void testWeatherKnotsAreExactAtMonthStarts() {
 }
 
 static void testWeatherInterpolatesBetweenKnots() {
-    MonthProfile profile;
+    TemperatureCurve profile;
     profile.setMonth(3, 500);
     profile.setMonth(4, 1200);
 
@@ -441,7 +481,7 @@ static void testWeatherInterpolatesBetweenKnots() {
 }
 
 static void testWeatherChangesWithTheClock() {
-    MonthProfile profile;
+    TemperatureCurve profile;
     profile.setMonth(5, 1800);
 
     std::unique_ptr<IEvaluator> ev = evaluatorWith(0, 0, 1, 0, flatProfile(0), profile);
@@ -456,7 +496,7 @@ static void testWeatherChangesWithTheClock() {
 }
 
 static void testWeatherIsReproducible() {
-    MonthProfile profile;
+    TemperatureCurve profile;
     profile.setMonth(5, 1800);
 
     std::unique_ptr<IEvaluator> a = evaluatorWith(0, 7, 1, 0, flatProfile(0), profile);
@@ -473,11 +513,11 @@ static void testZeroTemperatureLeavesPlantsAlone() {
     // All-zero temperature is the default everywhere else, so this pins two things at
     // once: zero weather is valid, and crops do not read it. Wiring them together is a
     // later decision and must not happen by accident.
-    std::unique_ptr<IEvaluator> cold = evaluatorWith(1, 0, 1, 1, flatProfile(100), flatProfile(0));
+    std::unique_ptr<IEvaluator> cold = evaluatorWith(1, 0, 1, 1, flatProfile(100), flatTemperature(0));
     cold->makeStep(kUsPerDay);
     CHECK_EQ(firstCropGrowth(*cold), 86400);
 
-    std::unique_ptr<IEvaluator> warm = evaluatorWith(1, 0, 1, 1, flatProfile(100), flatProfile(2000));
+    std::unique_ptr<IEvaluator> warm = evaluatorWith(1, 0, 1, 1, flatProfile(100), flatTemperature(2000));
     warm->makeStep(kUsPerDay);
     CHECK_EQ(firstCropGrowth(*warm), 86400);
 }
@@ -650,7 +690,7 @@ static void testBuildEvaluator() {
         CHECK_EQ(plants(*ev)->crops()[0].x, 0);
         CHECK_EQ(plants(*ev)->crops()[2].x, 2);
     }
-    CHECK_EQ(ev->clock().now_us(), 4 * kUsPerDay);
+    CHECK_EQ(ev->calendar().now_us(), 4 * kUsPerDay);
     CHECK(ev->mode() == Mode::Normal);
 
     CHECK_EQ(buildEvaluator(sc)->hash(), ev->hash());
@@ -737,7 +777,7 @@ static void testTimerNeedsAttaching() {
     CHECK(timer.attached());
 
     CHECK_EQ(timer.poll(100), 0);
-    CHECK_EQ(ev->clock().now_us(), 0);
+    CHECK_EQ(ev->calendar().now_us(), 0);
 }
 
 static void testTimerRunsDueSteps() {
@@ -748,12 +788,12 @@ static void testTimerRunsDueSteps() {
 
     time.advance(20000);
     CHECK_EQ(timer.poll(100), 1);
-    CHECK_EQ(ev->clock().now_us(), 20000);
+    CHECK_EQ(ev->calendar().now_us(), 20000);
     CHECK_EQ(ev->stepsTaken(), 1);
 
     time.advance(30000);
     CHECK_EQ(timer.poll(100), 1);
-    CHECK_EQ(ev->clock().now_us(), 40000);
+    CHECK_EQ(ev->calendar().now_us(), 40000);
     CHECK_EQ(timer.scheduler().pending_us(), 10000);
 }
 
@@ -815,7 +855,8 @@ static const TestEntry kTests[] = {
     {"calendar", testCalendar},
     {"seasons", testSeasons},
     {"month profile", testMonthProfileInterpolates},
-    {"clock", testClock},
+    {"calendar advances", testCalendarAdvances},
+    {"calendar month boundaries", testCalendarCountsMonthBoundaries},
     {"start day honoured", testStartDayIsHonoured},
     {"signals apply on boundary", testSignalsApplyOnBoundary},
     {"acceleration mode", testAccelerationMode},

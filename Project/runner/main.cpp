@@ -6,20 +6,20 @@
 #include <cstring>
 #include <string>
 
-#include "core/clock.h"
+#include "core/calendar.h"
 #include "core/evaluator.h"
 #include "core/scenario.h"
 
 static void printJson(const core::Scenario& sc, const core::IEvaluator& ev, std::uint64_t hash,
                       bool match) {
-    const core::CalendarDate d = core::toCalendar(ev.clock().now_us());
+    const core::CalendarDate d = ev.calendar().date();
     std::printf(
         "{\"hash\":%llu,\"now_us\":%lld,\"steps\":%lld,\"dt_us\":%lld,"
         "\"year\":%lld,\"month\":%d,\"day\":%d,\"hour\":%d,"
         "\"systems\":%zu,\"accelerating\":%s,"
         "\"expect\":%llu,\"match\":%s}\n",
         static_cast<unsigned long long>(hash),
-        static_cast<long long>(ev.clock().now_us()),
+        static_cast<long long>(ev.calendar().now_us()),
         static_cast<long long>(sc.steps),
         static_cast<long long>(sc.dt_us),
         static_cast<long long>(d.year),

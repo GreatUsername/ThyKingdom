@@ -1,4 +1,4 @@
-// Temperature, as a function of the clock.
+// Temperature, as a function of the calendar.
 //
 // The same shape as PlantSystem, and for the same reason: the temperature at an
 // instant is a property of that instant, not of the history that led to it. A curve
@@ -17,25 +17,25 @@
 #include <cstdint>
 
 #include "core/hash.h"
-#include "core/month_profile.h"
+#include "core/month_curve.h"
 #include "core/system.h"
 
 namespace core {
 
 class WeatherSystem final : public System {
 public:
-    explicit WeatherSystem(MonthProfile profile);
+    explicit WeatherSystem(TemperatureCurve profile);
 
     // The signature has to accept dt, but the temperature does not use it: the value
     // is a function of the instant, so the step only decides *when* it is refreshed.
-    void step(Clock& clock, std::int64_t dt_us) override;
+    void step(Calendar& calendar, std::int64_t dt_us) override;
     void hash(Hash64& h) const override;
 
     // Hundredths of a degree.
     std::int64_t temperature() const { return m_temperature; }
 
 private:
-    MonthProfile m_profile;
+    TemperatureCurve m_profile;
     std::int64_t m_temperature = 0;
 };
 
