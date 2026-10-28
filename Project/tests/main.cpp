@@ -29,6 +29,10 @@
 #include "runtime/time_source.h"
 #include "runtime/timer.h"
 
+#ifdef THYKINGDOM_PROFILE
+#include <easy/profiler.h>
+#endif
+
 using namespace core;
 
 static int g_checks = 0;
@@ -959,14 +963,32 @@ static void runBenchmark(std::int64_t steps) {
 
 int main(int argc, char** argv) {
     std::int64_t bench_steps = 0;
+    std::string profile_file;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--bench" && i + 1 < argc) {
             bench_steps = std::strtoll(argv[++i], nullptr, 10);
+        } else if (arg == "--profile" && i + 1 < argc) {
+            profile_file = argv[++i];
         } else if (arg.rfind("--", 0) != 0) {
             g_scenario_dir = arg;
         }
     }
+
+#ifdef THYKINGDOM_PROFILE
+    // Switched on before the first measured step, so every system step in every test
+    // is captured. The trace is written at the end, when the run is over.
+    if (!profile_file.empty()) {
+        profiler::setEnabled(true);
+    }
+#else
+    if (!profile_file.empty()) {
+        std::fprintf(stderr,
+                     "tests: this build has no profiler. Reconfigure with "
+                     "-DTHYKINGDOM_PROFILE=ON -DTHYKINGDOM_EASY_PROFILER_DIR=<path>\n");
+        return 2;
+    }
+#endif
 
     const int count = static_cast<int>(sizeof(kTests) / sizeof(kTests[0]));
     std::vector<Timing> timings;
@@ -997,6 +1019,13 @@ int main(int argc, char** argv) {
     if (bench_steps > 0) {
         runBenchmark(bench_steps);
     }
+
+#ifdef THYKINGDOM_PROFILE
+    if (!profile_file.empty()) {
+        const std::uint32_t blocks = profiler::dumpBlocksToFile(profile_file.c_str());
+        std::printf("\nprofile written: %s (%u blocks)\n", profile_file.c_str(), blocks);
+    }
+#endif
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

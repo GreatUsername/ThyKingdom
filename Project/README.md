@@ -84,6 +84,33 @@ cmake -S . -B build -G "Visual Studio 17 2022"
 cmake --build build --config Debug
 ```
 
+## Профилирование
+
+Профайлер не входит в обычную сборку: ядро не тянет сторонних зависимостей. Он включается опцией и только тогда линкуется.
+
+```
+cmake -S Project -B Project/build-prof -G "MinGW Makefiles" \
+      -DTHYKINGDOM_PROFILE=ON -DTHYKINGDOM_EASY_PROFILER_DIR=<путь к easy_profiler>
+cmake --build Project/build-prof --target tests
+./Project/build-prof/tests/tests.exe Project/scenarios --profile trace.prof
+```
+
+Каждый шаг каждой подсистемы становится именованным блоком — имя берётся из `System::name()`. Поэтому трасса отвечает не «шаг стоит столько-то», а «вот сколько стоит каждая подсистема»:
+
+| подсистема | шагов | всего, мс | мкс/шаг | доля |
+| --- | --- | --- | --- | --- |
+| `plants` | 351 440 | 75,9 | 0,216 | 64,6 % |
+| `weather` | 351 440 | 41,5 | 0,118 | 35,4 % |
+
+Трассу смотрят в GUI easy_profiler, а числа снимают сводкой:
+
+```
+profiler_converter.exe trace.prof trace.json
+python tools/profile_summary.py trace.json
+```
+
+Профайлер включается только по `--profile`; в сборке без опции `--profile` честно отказывает кодом 2, а не делает вид, что измеряет. Имя подсистемы в хеш не входит: переименование не должно менять прогон.
+
 ## Проверки
 
 ```sh

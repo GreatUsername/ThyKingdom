@@ -43,6 +43,7 @@ public:
 
     // The signature has to accept dt, but growth does not use it: the state is a
     // function of the calendar, so the step only decides *when* the value is refreshed.
+    const char* name() const override { return "plants"; }
     void step(Calendar& calendar, std::int64_t dt_us) override;
     void hash(Hash64& h) const override;
 

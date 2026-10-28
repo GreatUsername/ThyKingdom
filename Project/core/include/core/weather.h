@@ -28,6 +28,7 @@ public:
 
     // The signature has to accept dt, but the temperature does not use it: the value
     // is a function of the instant, so the step only decides *when* it is refreshed.
+    const char* name() const override { return "weather"; }
     void step(Calendar& calendar, std::int64_t dt_us) override;
     void hash(Hash64& h) const override;
 

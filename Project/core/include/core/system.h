@@ -20,6 +20,11 @@ class System {
 public:
     virtual ~System() = default;
 
+    // A stable label for this system. It names profiling blocks and says which
+    // system is meant in a diagnostic. It is not world state and does not enter the
+    // hash: renaming a system must not change a run.
+    virtual const char* name() const = 0;
+
     virtual void step(Calendar& calendar, std::int64_t dt_us) = 0;
     virtual void hash(Hash64& h) const = 0;
 };

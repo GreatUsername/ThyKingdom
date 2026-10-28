@@ -1,5 +1,9 @@
 #include "core/world.h"
 
+#ifdef THYKINGDOM_PROFILE
+#include <easy/profiler.h>
+#endif
+
 namespace core {
 
 void World::addSystem(std::unique_ptr<System> system) {
@@ -14,7 +18,18 @@ void World::step(std::int64_t dt_us) {
     static_cast<void>(m_calendar.advance(dt_us));
 
     for (const auto& system : m_systems) {
+#ifdef THYKINGDOM_PROFILE
+        // One named block per system, which is what makes a trace answer "which
+        // system costs what" instead of "the step costs this much". The block ends
+        // with the scope, so the timing covers exactly the step() call.
+        const char* block_name = system->name();
+        {
+            EASY_BLOCK(block_name, profiler::colors::Blue);
+            system->step(m_calendar, dt_us);
+        }
+#else
         system->step(m_calendar, dt_us);
+#endif
     }
 }
 

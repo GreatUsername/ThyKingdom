@@ -5,3 +5,6 @@ __pycache__/
 # Agent mailbox: live correspondence between concurrent agents, not history.
 # Anything worth keeping is moved into the Codex by the Scribe.
 .agents/
+
+# Profiler traces: large binaries written by a test run, never versioned.
+*.prof

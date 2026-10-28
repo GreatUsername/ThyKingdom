@@ -31,6 +31,13 @@ add_library(core STATIC
 
 target_include_directories(core PUBLIC include)
 
+# THYKINGDOM_PROFILE is PUBLIC on purpose: the tests binary needs the same define,
+# because it is what decides whether the profiler can be switched on at all.
+if(THYKINGDOM_PROFILE)
+  target_link_libraries(core PUBLIC easy_profiler)
+  target_compile_definitions(core PUBLIC THYKINGDOM_PROFILE=1 EASY_PROFILER_ENABLED)
+endif()
+
 if(MSVC)
   target_compile_options(core PRIVATE /W4)
 else()
